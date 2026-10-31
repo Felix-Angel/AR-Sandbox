@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../configuracion/screens/pantalla_configuracion.dart';
+import '../../simulacion/screens/pantalla_simulacion.dart';
 
 class PantallaInicio extends StatefulWidget {
   const PantallaInicio({super.key});
@@ -17,6 +18,7 @@ class _PantallaInicioState extends State<PantallaInicio> {
     color: AppTheme.verde,
     altura: 50,
   );
+  EstadoSimulacion _estadoSimulacion = EstadoSimulacion.sinConfigurar;
 
   void _irA(int seccion) => setState(() => _seccion = seccion);
 
@@ -29,8 +31,10 @@ class _PantallaInicioState extends State<PantallaInicio> {
         alSeleccionar: (nombre) => setState(() {
           if (_terreno == nombre) {
             _terreno = null;
+            _estadoSimulacion = EstadoSimulacion.sinConfigurar;
           } else {
             _terreno = nombre;
+            _estadoSimulacion = EstadoSimulacion.lista;
             _configuracion = const ConfiguracionTerreno(
               color: AppTheme.verde,
               altura: 50,
@@ -49,6 +53,23 @@ class _PantallaInicioState extends State<PantallaInicio> {
           onConfiguracionChanged: (configuracion) =>
               setState(() => _configuracion = configuracion),
         ),
+      PantallaSimulacion(
+        terreno: _terreno,
+        configuracion: _configuracion,
+        estado: _estadoSimulacion,
+        alIniciar: () {
+          if (_terreno != null &&
+              _estadoSimulacion != EstadoSimulacion.enEjecucion) {
+            setState(() => _estadoSimulacion = EstadoSimulacion.enEjecucion);
+          }
+        },
+        alDetener: () {
+          if (_estadoSimulacion == EstadoSimulacion.enEjecucion) {
+            setState(() => _estadoSimulacion = EstadoSimulacion.detenida);
+          }
+        },
+        alSeleccionarTerreno: () => _irA(1),
+      ),
       const _Ajustes(),
     ];
 
@@ -58,7 +79,7 @@ class _PantallaInicioState extends State<PantallaInicio> {
         actions: [
           IconButton(
             tooltip: 'Ajustes',
-            onPressed: () => _irA(3),
+            onPressed: () => _irA(4),
             icon: const Icon(Icons.settings_outlined),
           ),
         ],
@@ -85,6 +106,11 @@ class _PantallaInicioState extends State<PantallaInicio> {
             icon: Icon(Icons.tune_outlined),
             selectedIcon: Icon(Icons.tune),
             label: 'Configurar',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.play_circle_outline_rounded),
+            selectedIcon: Icon(Icons.play_circle_fill_rounded),
+            label: 'Simulación',
           ),
           NavigationDestination(
             icon: Icon(Icons.settings_outlined),
@@ -124,7 +150,7 @@ class _Inicio extends StatelessWidget {
             ?.copyWith(color: AppTheme.tinta.withValues(alpha: .78)),
       ),
       const SizedBox(height: 18),
-      _HeroSimulacion(onTap: () => irA(terreno == null ? 1 : 2)),
+      _HeroSimulacion(onTap: () => irA(3)),
       const SizedBox(height: 18),
       Card(
         clipBehavior: Clip.antiAlias,

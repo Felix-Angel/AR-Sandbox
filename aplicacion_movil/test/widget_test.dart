@@ -65,4 +65,58 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Primero elige un terreno'), findsOneWidget);
   });
+
+  testWidgets('inicia, conserva y detiene la simulación local', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(const ARSandboxApp());
+
+    await tester.tap(find.byIcon(Icons.play_circle_outline_rounded));
+    await tester.pumpAndSettle();
+    expect(find.text('Sin configurar'), findsOneWidget);
+    expect(find.text('Seleccionar terreno'), findsOneWidget);
+    expect(find.text('Iniciar simulación'), findsNothing);
+
+    await tester.ensureVisible(find.text('Seleccionar terreno'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Seleccionar terreno'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Montañas'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continuar a configuración'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.play_circle_outline_rounded));
+    await tester.pumpAndSettle();
+    expect(find.text('Lista para iniciar'), findsOneWidget);
+    expect(find.text('Montañas'), findsOneWidget);
+    expect(find.text('Verde bosque'), findsOneWidget);
+    expect(find.text('50%'), findsOneWidget);
+
+    await tester.tap(find.text('Iniciar simulación'));
+    await tester.pumpAndSettle();
+    expect(find.text('En ejecución'), findsOneWidget);
+    expect(find.text('Detener simulación'), findsOneWidget);
+    expect(find.text('Iniciar simulación'), findsNothing);
+
+    await tester.tap(find.text('Inicio'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.play_circle_outline_rounded));
+    await tester.pumpAndSettle();
+    expect(find.text('En ejecución'), findsOneWidget);
+
+    await tester.tap(find.text('Detener simulación'));
+    await tester.pumpAndSettle();
+    expect(find.text('Detenida'), findsOneWidget);
+    expect(find.text('Reanudar simulación'), findsOneWidget);
+
+    await tester.tap(find.text('Configurar'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.bySemanticsLabel('Terracota'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.play_circle_outline_rounded));
+    await tester.pumpAndSettle();
+    expect(find.text('Detenida'), findsOneWidget);
+    expect(find.text('Terracota'), findsOneWidget);
+  });
 }
