@@ -1,11 +1,19 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import '../../../core/network/backend_api_service.dart';
+import '../../../core/network/models/configuracion_simulacion.dart'
+    show ConfiguracionSimulacion, SolicitudConfiguracion, TerrenosApi;
+import '../../../core/network/models/respuesta_simulacion.dart' as api_models;
 import '../../../core/theme/app_theme.dart';
 import '../../configuracion/screens/pantalla_configuracion.dart';
 import '../../simulacion/screens/pantalla_simulacion.dart';
 
 class PantallaInicio extends StatefulWidget {
-  const PantallaInicio({super.key});
+  const PantallaInicio({super.key, this.backendApiService});
+
+  final BackendApiService? backendApiService;
 
   @override
   State<PantallaInicio> createState() => _PantallaInicioState();
@@ -19,22 +27,169 @@ class _PantallaInicioState extends State<PantallaInicio> {
     altura: 50,
   );
   EstadoSimulacion _estadoSimulacion = EstadoSimulacion.sinConfigurar;
+  bool _configuracionGuardada = false;
+  bool _registroEnCurso = false;
+  bool _consultandoEstado = false;
+  bool _operacionSimulacionEnCurso = false;
+  bool _estadoConfirmado = false;
+  String? _errorBackend;
+  BackendApiService? _ownedBackendApi;
 
-  void _irA(int seccion) => setState(() => _seccion = seccion);
+  BackendApiService get _backendApi =>
+      widget.backendApiService ?? (_ownedBackendApi ??= BackendApiService());
+
+  void _irA(int seccion) {
+    setState(() => _seccion = seccion);
+    if (seccion == 3) unawaited(_consultarEstado());
+  }
+
+  EstadoSimulacion _estadoDesdeApi(api_models.EstadoSimulacionApi estado) =>
+      switch (estado) {
+        api_models.EstadoSimulacionApi.sinConfigurar =>
+          EstadoSimulacion.sinConfigurar,
+        api_models.EstadoSimulacionApi.lista => EstadoSimulacion.lista,
+        api_models.EstadoSimulacionApi.enEjecucion =>
+          EstadoSimulacion.enEjecucion,
+        api_models.EstadoSimulacionApi.detenida => EstadoSimulacion.detenida,
+      };
+
+  void _sincronizarDesdeBackend(
+    api_models.EstadoSimulacionApi estado,
+    ConfiguracionSimulacion? configuracion,
+  ) {
+    _estadoSimulacion = _estadoDesdeApi(estado);
+    if (configuracion == null) {
+      _terreno = null;
+      _configuracion = const ConfiguracionTerreno(
+        color: AppTheme.verde,
+        altura: 50,
+      );
+      _configuracionGuardada = false;
+      return;
+    }
+    _terreno = TerrenosApi.aNombre(configuracion.terreno);
+    _configuracion = ConfiguracionTerreno.desdeApi(configuracion);
+    _configuracionGuardada = true;
+  }
+
+  void _aplicarRespuestaBackend(api_models.RespuestaSimulacion respuesta) {
+    _sincronizarDesdeBackend(respuesta.estado, respuesta.configuracion);
+    _estadoConfirmado = true;
+    _errorBackend = null;
+  }
+
+  Future<void> _consultarEstado() async {
+    if (_consultandoEstado || _operacionSimulacionEnCurso) return;
+    setState(() {
+      _consultandoEstado = true;
+      _estadoConfirmado = false;
+      _errorBackend = null;
+    });
+    try {
+      final respuesta = await _backendApi.obtenerEstado();
+      if (!mounted) return;
+      setState(() {
+        _sincronizarDesdeBackend(respuesta.estado, respuesta.configuracion);
+        _estadoConfirmado = true;
+      });
+    } on BackendApiException catch (error) {
+      if (mounted) setState(() => _errorBackend = error.message);
+    } on FormatException catch (error) {
+      if (mounted) setState(() => _errorBackend = error.message);
+    } finally {
+      if (mounted) setState(() => _consultandoEstado = false);
+    }
+  }
+
+  Future<api_models.RespuestaSimulacion> _iniciarSimulacion() =>
+      _ejecutarOperacionSimulacion(_backendApi.iniciarSimulacion);
+
+  Future<api_models.RespuestaSimulacion> _detenerSimulacion() =>
+      _ejecutarOperacionSimulacion(_backendApi.detenerSimulacion);
+
+  Future<api_models.RespuestaSimulacion> _ejecutarOperacionSimulacion(
+    Future<api_models.RespuestaSimulacion> Function() operacion,
+  ) async {
+    if (_operacionSimulacionEnCurso || !_estadoConfirmado) {
+      throw StateError(
+        'Espera a confirmar el estado del servidor antes de continuar.',
+      );
+    }
+    setState(() {
+      _operacionSimulacionEnCurso = true;
+      _errorBackend = null;
+    });
+    try {
+      final respuesta = await operacion();
+      if (mounted) setState(() => _aplicarRespuestaBackend(respuesta));
+      return respuesta;
+    } on BackendApiException catch (error) {
+      if (mounted) setState(() => _errorBackend = error.message);
+      rethrow;
+    } finally {
+      if (mounted) setState(() => _operacionSimulacionEnCurso = false);
+    }
+  }
+
+  Future<api_models.RespuestaSimulacion> _registrarConfiguracion(
+    SolicitudConfiguracion solicitud,
+  ) async {
+    if (_registroEnCurso) {
+      throw StateError('Ya hay un registro de configuración en curso.');
+    }
+    setState(() {
+      _registroEnCurso = true;
+      _configuracionGuardada = false;
+    });
+    try {
+      final respuesta = await _backendApi.registrarConfiguracion(solicitud);
+      if (mounted) {
+        final coincideConLaActual =
+            _terreno != null &&
+            TerrenosApi.aId(_terreno!) == solicitud.terreno &&
+            _configuracion.nombreColor == solicitud.color &&
+            _configuracion.altura == solicitud.altura;
+        setState(() {
+          if (coincideConLaActual) {
+            _aplicarRespuestaBackend(respuesta);
+          } else {
+            _configuracionGuardada = false;
+            _estadoConfirmado = false;
+          }
+        });
+      }
+      return respuesta;
+    } finally {
+      if (mounted) setState(() => _registroEnCurso = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _ownedBackendApi?.close();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final pantallas = <Widget>[
-      _Inicio(terreno: _terreno, configuracion: _configuracion, irA: _irA),
+      _Inicio(
+        terreno: _terreno,
+        configuracion: _configuracion,
+        configuracionGuardada: _configuracionGuardada,
+        irA: _irA,
+      ),
       _Terrenos(
         seleccionado: _terreno,
+        configuracion: _configuracion,
+        configuracionGuardada: _configuracionGuardada,
         alSeleccionar: (nombre) => setState(() {
+          _configuracionGuardada = false;
+          _estadoConfirmado = false;
           if (_terreno == nombre) {
             _terreno = null;
-            _estadoSimulacion = EstadoSimulacion.sinConfigurar;
           } else {
             _terreno = nombre;
-            _estadoSimulacion = EstadoSimulacion.lista;
             _configuracion = const ConfiguracionTerreno(
               color: AppTheme.verde,
               altura: 50,
@@ -50,24 +205,26 @@ class _PantallaInicioState extends State<PantallaInicio> {
           key: ValueKey(_terreno),
           terreno: _terreno!,
           configuracion: _configuracion,
-          onConfiguracionChanged: (configuracion) =>
-              setState(() => _configuracion = configuracion),
+          configuracionGuardada: _configuracionGuardada,
+          registroEnCurso: _registroEnCurso,
+          onConfiguracionChanged: (configuracion) => setState(() {
+            _configuracion = configuracion;
+            _configuracionGuardada = false;
+            _estadoConfirmado = false;
+          }),
+          onRegistrarConfiguracion: _registrarConfiguracion,
         ),
       PantallaSimulacion(
         terreno: _terreno,
         configuracion: _configuracion,
         estado: _estadoSimulacion,
-        alIniciar: () {
-          if (_terreno != null &&
-              _estadoSimulacion != EstadoSimulacion.enEjecucion) {
-            setState(() => _estadoSimulacion = EstadoSimulacion.enEjecucion);
-          }
-        },
-        alDetener: () {
-          if (_estadoSimulacion == EstadoSimulacion.enEjecucion) {
-            setState(() => _estadoSimulacion = EstadoSimulacion.detenida);
-          }
-        },
+        estadoConfirmado: _estadoConfirmado,
+        consultandoEstado: _consultandoEstado,
+        operacionEnCurso: _operacionSimulacionEnCurso,
+        errorBackend: _errorBackend,
+        alIniciar: _iniciarSimulacion,
+        alDetener: _detenerSimulacion,
+        alActualizarEstado: () => unawaited(_consultarEstado()),
         alSeleccionarTerreno: () => _irA(1),
       ),
       const _Ajustes(),
@@ -127,11 +284,13 @@ class _Inicio extends StatelessWidget {
   const _Inicio({
     required this.terreno,
     required this.configuracion,
+    required this.configuracionGuardada,
     required this.irA,
   });
 
   final String? terreno;
   final ConfiguracionTerreno configuracion;
+  final bool configuracionGuardada;
   final ValueChanged<int> irA;
 
   @override
@@ -213,13 +372,17 @@ class _Inicio extends StatelessWidget {
                             ),
                             const SizedBox(height: 4),
                             Text(
-                      '${configuracion.nombreColor} · ${configuracion.altura.round()}% de altura',
+                              '${configuracion.nombreColor} · ${configuracion.altura.round()}% de altura',
                             ),
                           ],
                         ),
                       ),
                     ],
                   ),
+                if (terreno != null) ...[
+                  const SizedBox(height: 8),
+                  _EstadoRegistro(guardada: configuracionGuardada),
+                ],
               ],
             ),
           ),
@@ -256,7 +419,7 @@ class _Inicio extends StatelessWidget {
         ],
       ),
       const SizedBox(height: 14),
-      const _EstadoConexion(),
+      _EstadoConexion(configuracionGuardada: configuracionGuardada),
     ],
   );
 }
@@ -372,21 +535,60 @@ class _AccesoInicio extends StatelessWidget {
 }
 
 class _EstadoConexion extends StatelessWidget {
-  const _EstadoConexion();
+  const _EstadoConexion({required this.configuracionGuardada});
+
+  final bool configuracionGuardada;
 
   @override
   Widget build(BuildContext context) => Card(
     child: ListTile(
-      leading: const CircleAvatar(
-        backgroundColor: Color(0xFFFFF0E9),
-        child: Icon(Icons.cloud_off_rounded, color: AppTheme.terracota),
+      leading: CircleAvatar(
+        backgroundColor: configuracionGuardada
+            ? AppTheme.verde.withValues(alpha: .12)
+            : const Color(0xFFFFF0E9),
+        child: Icon(
+          configuracionGuardada
+              ? Icons.cloud_done_rounded
+              : Icons.cloud_upload_rounded,
+          color: configuracionGuardada ? AppTheme.verde : AppTheme.terracota,
+        ),
       ),
-      title: const Text(
-        'Servidor sin configurar',
+      title: Text(
+        configuracionGuardada
+            ? 'Configuración registrada'
+            : 'Registro en servidor pendiente',
         style: TextStyle(fontWeight: FontWeight.w600),
       ),
-      subtitle: const Text('La conexión estará disponible próximamente.'),
-      trailing: const Icon(Icons.circle, size: 10, color: AppTheme.terracota),
+      subtitle: Text(
+        configuracionGuardada
+            ? 'FastAPI confirmó el registro de la configuración actual.'
+            : 'Guarda tu terreno y sus ajustes para enviarlos a FastAPI.',
+      ),
+      trailing: Icon(
+        Icons.circle,
+        size: 10,
+        color: configuracionGuardada ? AppTheme.verde : AppTheme.terracota,
+      ),
+    ),
+  );
+}
+
+class _EstadoRegistro extends StatelessWidget {
+  const _EstadoRegistro({required this.guardada});
+
+  final bool guardada;
+
+  @override
+  Widget build(BuildContext context) => Align(
+    alignment: Alignment.centerLeft,
+    child: Chip(
+      avatar: Icon(
+        guardada ? Icons.cloud_done_outlined : Icons.cloud_upload_outlined,
+        size: 18,
+        color: guardada ? AppTheme.verde : AppTheme.terracota,
+      ),
+      label: Text(guardada ? 'Guardada en servidor' : 'Pendiente de registro'),
+      visualDensity: VisualDensity.compact,
     ),
   );
 }
@@ -394,15 +596,23 @@ class _EstadoConexion extends StatelessWidget {
 class _Terrenos extends StatelessWidget {
   const _Terrenos({
     required this.seleccionado,
+    required this.configuracion,
+    required this.configuracionGuardada,
     required this.alSeleccionar,
     required this.irA,
   });
 
   final String? seleccionado;
+  final ConfiguracionTerreno configuracion;
+  final bool configuracionGuardada;
   final ValueChanged<String> alSeleccionar;
   final ValueChanged<int> irA;
   static const _terrenos = [
-    ('Montañas', 'Cumbres altas y pendientes pronunciadas.', Icons.landscape_rounded),
+    (
+      'Montañas',
+      'Cumbres altas y pendientes pronunciadas.',
+      Icons.landscape_rounded,
+    ),
     ('Valles', 'Depresiones suaves entre montañas.', Icons.waves_rounded),
     ('Volcanes', 'Relieves elevados con cráteres.', Icons.volcano_rounded),
     ('Llanuras', 'Superficies amplias y casi planas.', Icons.grass_rounded),
@@ -484,9 +694,7 @@ class _Terrenos extends StatelessWidget {
                           ),
                           const SizedBox(height: 2),
                           Icon(
-                            activo
-                                ? Icons.check_circle
-                                : Icons.circle_outlined,
+                            activo ? Icons.check_circle : Icons.circle_outlined,
                             size: 18,
                             color: activo
                                 ? AppTheme.terracota
@@ -505,13 +713,43 @@ class _Terrenos extends StatelessWidget {
       if (seleccionado != null)
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-          child: SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: () => irA(2),
-              icon: const Icon(Icons.tune),
-              label: const Text('Continuar a configuración'),
-            ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Card(
+                child: ListTile(
+                  dense: true,
+                  leading: Icon(
+                    Icons.palette_outlined,
+                    color: configuracion.color,
+                  ),
+                  title: Text(
+                    '${configuracion.nombreColor} · ${configuracion.altura.round()}% de altura',
+                  ),
+                  subtitle: Text(
+                    configuracionGuardada
+                        ? 'Configuración guardada en el servidor'
+                        : 'Configuración local',
+                  ),
+                  trailing: Icon(
+                    configuracionGuardada
+                        ? Icons.cloud_done_outlined
+                        : Icons.cloud_upload_outlined,
+                    color: configuracionGuardada
+                        ? AppTheme.verde
+                        : AppTheme.terracota,
+                  ),
+                ),
+              ),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: () => irA(2),
+                  icon: const Icon(Icons.tune),
+                  label: const Text('Continuar a configuración'),
+                ),
+              ),
+            ],
           ),
         ),
     ],

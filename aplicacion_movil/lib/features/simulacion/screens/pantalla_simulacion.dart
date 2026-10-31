@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/network/backend_api_service.dart';
+import '../../../core/network/models/respuesta_simulacion.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../configuracion/screens/pantalla_configuracion.dart';
 
@@ -11,21 +13,58 @@ class PantallaSimulacion extends StatelessWidget {
     required this.terreno,
     required this.configuracion,
     required this.estado,
+    required this.estadoConfirmado,
+    required this.consultandoEstado,
+    required this.operacionEnCurso,
+    required this.errorBackend,
     required this.alIniciar,
     required this.alDetener,
+    required this.alActualizarEstado,
     required this.alSeleccionarTerreno,
   });
 
   final String? terreno;
   final ConfiguracionTerreno configuracion;
   final EstadoSimulacion estado;
-  final VoidCallback alIniciar;
-  final VoidCallback alDetener;
+  final bool estadoConfirmado;
+  final bool consultandoEstado;
+  final bool operacionEnCurso;
+  final String? errorBackend;
+  final Future<RespuestaSimulacion> Function() alIniciar;
+  final Future<RespuestaSimulacion> Function() alDetener;
+  final VoidCallback alActualizarEstado;
   final VoidCallback alSeleccionarTerreno;
+
+  Future<void> _ejecutarOperacion(
+    BuildContext context,
+    Future<RespuestaSimulacion> Function() operacion,
+  ) async {
+    try {
+      final respuesta = await operacion();
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(respuesta.mensaje)));
+    } on BackendApiException catch (error) {
+      if (!context.mounted) return;
+      final mensaje = error.statusCode == null
+          ? 'No se pudo conectar con FastAPI. ${error.message}'
+          : 'FastAPI respondió HTTP ${error.statusCode}: ${error.message}';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(mensaje), backgroundColor: AppTheme.terracota),
+      );
+    } on StateError catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error.message)));
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final configurada = terreno != null;
+    final configurada =
+        estadoConfirmado &&
+        terreno != null &&
+        estado != EstadoSimulacion.sinConfigurar;
     final activa = estado == EstadoSimulacion.enEjecucion;
     final colorEstado = switch (estado) {
       EstadoSimulacion.sinConfigurar => AppTheme.terracota,
@@ -51,10 +90,8 @@ class PantallaSimulacion extends StatelessWidget {
       children: [
         Text(
           'Simulación',
-          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-            color: AppTheme.tinta,
-            fontWeight: FontWeight.bold,
-          ),
+          style: Theme.of(context).textTheme.headlineSmall
+              ?.copyWith(color: AppTheme.tinta, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 6),
         Text(
@@ -62,13 +99,46 @@ class PantallaSimulacion extends StatelessWidget {
           style: Theme.of(context).textTheme.bodyMedium,
         ),
         const SizedBox(height: 16),
-        Card(
-          color: colorEstado.withValues(alpha: .1),
-          child: ListTile(
-            leading: Icon(iconoEstado, color: colorEstado, size: 32),
-            title: const Text('Estado de simulación'),
-            subtitle: Text(textoEstado),
-            trailing: Icon(Icons.circle, size: 12, color: colorEstado),
+        if (consultandoEstado)
+          const Card(
+            child: ListTile(
+              leading: SizedBox.square(
+                dimension: 24,
+                child: CircularProgressIndicator(strokeWidth: 2.5),
+              ),
+              title: Text('Consultando estado en FastAPI…'),
+              subtitle: Text('Esperando una respuesta del servidor.'),
+            ),
+          )
+        else if (!estadoConfirmado)
+          Card(
+            child: ListTile(
+              leading: const Icon(
+                Icons.cloud_off_outlined,
+                color: AppTheme.terracota,
+              ),
+              title: const Text('No se pudo confirmar el estado'),
+              subtitle: Text(errorBackend ?? 'Vuelve a consultar el servidor.'),
+            ),
+          )
+        else
+          Card(
+            color: colorEstado.withValues(alpha: .1),
+            child: ListTile(
+              leading: Icon(iconoEstado, color: colorEstado, size: 32),
+              title: const Text('Estado confirmado por FastAPI'),
+              subtitle: Text(textoEstado),
+              trailing: Icon(Icons.circle, size: 12, color: colorEstado),
+            ),
+          ),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton.icon(
+            onPressed: consultandoEstado || operacionEnCurso
+                ? null
+                : alActualizarEstado,
+            icon: const Icon(Icons.refresh_rounded),
+            label: const Text('Actualizar estado'),
           ),
         ),
         const SizedBox(height: 12),
@@ -83,7 +153,7 @@ class PantallaSimulacion extends StatelessWidget {
                 SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'Esta etapa controla una simulación local de prueba. No se conecta al servidor ni a la proyección física.',
+                    'FastAPI controla el estado lógico de prueba. Esta etapa no genera geometría 3D ni controla una proyección física.',
                   ),
                 ),
               ],
@@ -100,9 +170,8 @@ class PantallaSimulacion extends StatelessWidget {
                 children: [
                   Text(
                     'Configuración actual',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: Theme.of(context).textTheme.titleMedium
+                        ?.copyWith(fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 14),
                   _DatoSimulacion(
@@ -135,21 +204,35 @@ class PantallaSimulacion extends StatelessWidget {
               style: FilledButton.styleFrom(
                 backgroundColor: AppTheme.terracota,
               ),
-              onPressed: alDetener,
-              icon: const Icon(Icons.stop_rounded),
+              onPressed: operacionEnCurso
+                  ? null
+                  : () => _ejecutarOperacion(context, alDetener),
+              icon: operacionEnCurso
+                  ? const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.stop_rounded),
               label: const Text('Detener simulación'),
             )
           else
             FilledButton.icon(
-              onPressed: alIniciar,
-              icon: const Icon(Icons.play_arrow_rounded),
+              onPressed: operacionEnCurso
+                  ? null
+                  : () => _ejecutarOperacion(context, alIniciar),
+              icon: operacionEnCurso
+                  ? const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.play_arrow_rounded),
               label: Text(
                 estado == EstadoSimulacion.detenida
                     ? 'Reanudar simulación'
                     : 'Iniciar simulación',
               ),
             ),
-        ] else ...[
+        ] else if (estadoConfirmado) ...[
           Card(
             child: Padding(
               padding: const EdgeInsets.all(20),
@@ -164,9 +247,8 @@ class PantallaSimulacion extends StatelessWidget {
                   Text(
                     'Selecciona un terreno antes de iniciar',
                     textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: Theme.of(context).textTheme.titleMedium
+                        ?.copyWith(fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 6),
                   const Text(
@@ -211,9 +293,8 @@ class _DatoSimulacion extends StatelessWidget {
         width: 72,
         child: Text(
           titulo,
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-            color: AppTheme.tinta.withValues(alpha: .7),
-          ),
+          style: Theme.of(context).textTheme.bodyMedium
+              ?.copyWith(color: AppTheme.tinta.withValues(alpha: .7)),
         ),
       ),
       Expanded(
