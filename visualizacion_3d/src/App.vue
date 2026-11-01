@@ -1,10 +1,13 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import EstadoConexion from './components/EstadoConexion.vue'
 import PanelCalibracion from './components/PanelCalibracion.vue'
 import PanelInformacion from './components/PanelInformacion.vue'
 import VisorTerreno from './components/VisorTerreno.vue'
 import { backendService } from './services/backendService.js'
+import { crearCanalProyector } from './services/projectorChannel.js'
+
+const esVentanaProyeccion = new URLSearchParams(window.location.search).get('modo') === 'proyector'
 
 const configuracion = ref(null)
 const estado = ref('sin_configurar')
@@ -15,6 +18,11 @@ const ultimaActualizacion = ref('Sin datos')
 const contenedorApp = ref(null)
 const modoProyector = ref(false)
 const pantallaCompleta = ref(false)
+const canalDisponible = ref(true)
+const controlConectado = ref(false)
+const proyeccionActiva = ref(false)
+const errorAperturaProyeccion = ref('')
+const ventanaProyeccion = shallowRef(null)
 const calibracion = ref({
   superficie: 'caja',
   orientacion: 'horizontal',
@@ -30,6 +38,13 @@ let intervaloActualizacion = null
 let consultaEnCurso = false
 let componenteActivo = true
 let consultaActiva = null
+let canalProyector = null
+let intervaloHeartbeatControl = null
+let intervaloAnuncioProyeccion = null
+let intervaloVigilanciaControl = null
+let intervaloCierreVentana = null
+let ultimaActividadControl = 0
+let ultimaInstantaneaEnviada = ''
 
 const configurado = computed(() => Boolean(configuracion.value))
 
@@ -145,7 +160,154 @@ function restablecerCalibracion() {
   }
 }
 
+function crearInstantaneaProyeccion() {
+  return {
+    configuracion: configuracion.value === null
+      ? null
+      : JSON.parse(JSON.stringify(configuracion.value)),
+    estado: estado.value,
+    conectado: conectado.value,
+    calibracion: JSON.parse(JSON.stringify(calibracion.value)),
+  }
+}
+
+function enviarInstantaneaProyeccion(forzar = false) {
+  if (esVentanaProyeccion || !canalProyector) return
+
+  const instantanea = crearInstantaneaProyeccion()
+  const serializada = JSON.stringify(instantanea)
+  if (!forzar && serializada === ultimaInstantaneaEnviada) return
+
+  ultimaInstantaneaEnviada = serializada
+  canalProyector.enviar('state-snapshot', instantanea)
+}
+
+function manejarMensajeProyector(mensaje) {
+  if (!esVentanaProyeccion) {
+    if (mensaje.origen === 'proyeccion' && mensaje.tipo === 'projection-ready') {
+      proyeccionActiva.value = true
+      enviarInstantaneaProyeccion(true)
+    }
+    return
+  }
+
+  if (mensaje.origen !== 'control') return
+
+  if (mensaje.tipo === 'control-heartbeat') {
+    ultimaActividadControl = Date.now()
+    controlConectado.value = true
+    return
+  }
+
+  if (mensaje.tipo === 'state-snapshot' && mensaje.datos && typeof mensaje.datos === 'object') {
+    const datos = mensaje.datos
+    if (!('configuracion' in datos) || typeof datos.estado !== 'string'
+      || typeof datos.conectado !== 'boolean' || !datos.calibracion) {
+      return
+    }
+
+    configuracion.value = datos.configuracion
+    estado.value = datos.estado
+    conectado.value = datos.conectado
+    calibracion.value = datos.calibracion
+    ultimaActividadControl = Date.now()
+    controlConectado.value = true
+
+    if (intervaloAnuncioProyeccion !== null) {
+      window.clearInterval(intervaloAnuncioProyeccion)
+      intervaloAnuncioProyeccion = null
+    }
+  }
+}
+
+function abrirVentanaProyeccion() {
+  if (ventanaProyeccion.value && !ventanaProyeccion.value.closed) {
+    ventanaProyeccion.value.focus()
+    return
+  }
+
+  errorAperturaProyeccion.value = ''
+  const urlProyeccion = new URL(window.location.href)
+  urlProyeccion.searchParams.set('modo', 'proyector')
+  const ventana = window.open(
+    urlProyeccion.toString(),
+    'arSandboxProjection',
+    'popup,width=1280,height=800,resizable=yes',
+  )
+
+  if (!ventana) {
+    errorAperturaProyeccion.value = 'El navegador bloqueó la ventana. Permite ventanas emergentes o usa “Modo proyector” en esta página.'
+    proyeccionActiva.value = false
+    return
+  }
+
+  ventanaProyeccion.value = ventana
+  proyeccionActiva.value = true
+  if (intervaloCierreVentana !== null) window.clearInterval(intervaloCierreVentana)
+  intervaloCierreVentana = window.setInterval(() => {
+    if (!ventanaProyeccion.value || ventanaProyeccion.value.closed) {
+      window.clearInterval(intervaloCierreVentana)
+      intervaloCierreVentana = null
+      ventanaProyeccion.value = null
+      proyeccionActiva.value = false
+    }
+  }, 750)
+}
+
+function cerrarVentanaProyeccion() {
+  if (ventanaProyeccion.value && !ventanaProyeccion.value.closed) {
+    ventanaProyeccion.value.close()
+  }
+}
+
+function iniciarAnuncioProyeccion() {
+  if (intervaloAnuncioProyeccion !== null || !canalProyector) return
+  const anunciarLista = () => canalProyector?.enviar('projection-ready')
+  anunciarLista()
+  intervaloAnuncioProyeccion = window.setInterval(anunciarLista, 2000)
+}
+
+function iniciarCanalProyector() {
+  canalProyector = crearCanalProyector(
+    esVentanaProyeccion ? 'proyeccion' : 'control',
+    manejarMensajeProyector,
+  )
+
+  if (!canalProyector) {
+    canalDisponible.value = false
+    if (!esVentanaProyeccion) {
+      errorAperturaProyeccion.value = 'BroadcastChannel no está disponible. Puedes usar “Modo proyector” en esta página.'
+    }
+    return
+  }
+
+  if (esVentanaProyeccion) {
+    iniciarAnuncioProyeccion()
+    intervaloVigilanciaControl = window.setInterval(() => {
+      if (ultimaActividadControl && Date.now() - ultimaActividadControl > 10000) {
+        controlConectado.value = false
+        iniciarAnuncioProyeccion()
+      }
+    }, 2500)
+    return
+  }
+
+  const enviarLatido = () => canalProyector?.enviar('control-heartbeat')
+  enviarLatido()
+  intervaloHeartbeatControl = window.setInterval(enviarLatido, 2500)
+}
+
+watch(
+  [configuracion, estado, conectado, calibracion],
+  () => enviarInstantaneaProyeccion(),
+  { deep: true },
+)
+
 onMounted(() => {
+  iniciarCanalProyector()
+
+  if (esVentanaProyeccion) return
+
   document.addEventListener('fullscreenchange', sincronizarPantallaCompleta)
   document.addEventListener('keydown', manejarTecla)
   consultarBackend()
@@ -157,23 +319,49 @@ onUnmounted(() => {
   document.removeEventListener('fullscreenchange', sincronizarPantallaCompleta)
   document.removeEventListener('keydown', manejarTecla)
 
+  for (const intervalo of [
+    intervaloHeartbeatControl,
+    intervaloAnuncioProyeccion,
+    intervaloVigilanciaControl,
+    intervaloCierreVentana,
+  ]) {
+    if (intervalo !== null) window.clearInterval(intervalo)
+  }
+
   if (intervaloActualizacion !== null) {
     window.clearInterval(intervaloActualizacion)
     intervaloActualizacion = null
   }
 
   consultaActiva?.abort()
+  canalProyector?.cerrar()
+  canalProyector = null
 })
 </script>
 
 <template>
-  <div ref="contenedorApp" class="app-shell" :class="{ 'projector-mode': modoProyector }">
-    <header class="topbar">
+  <div
+    ref="contenedorApp"
+    class="app-shell"
+    :class="{
+      'projector-mode': !esVentanaProyeccion && modoProyector,
+      'standalone-projection': esVentanaProyeccion,
+    }"
+  >
+    <header v-if="!esVentanaProyeccion" class="topbar">
       <div>
         <p class="eyebrow">AR Sandbox</p>
         <h1>Visualización 3D</h1>
       </div>
       <div class="topbar-actions">
+        <button
+          class="projector-button"
+          type="button"
+          :disabled="!canalDisponible"
+          @click="proyeccionActiva ? cerrarVentanaProyeccion() : abrirVentanaProyeccion()"
+        >
+          {{ proyeccionActiva ? 'Cerrar ventana de proyección' : 'Abrir ventana de proyección' }}
+        </button>
         <button class="projector-button" @click="activarModoProyector">Modo proyector</button>
         <button class="refresh-button" @click="consultarBackend" :disabled="cargando">
           {{ cargando ? 'Consultando...' : 'Actualizar' }}
@@ -181,8 +369,12 @@ onUnmounted(() => {
       </div>
     </header>
 
+    <p v-if="errorAperturaProyeccion && !esVentanaProyeccion" class="projection-open-error" role="status">
+      {{ errorAperturaProyeccion }}
+    </p>
+
     <button
-      v-if="modoProyector"
+      v-if="modoProyector && !esVentanaProyeccion"
       class="projector-exit-button"
       type="button"
       :aria-pressed="pantallaCompleta"
@@ -191,7 +383,7 @@ onUnmounted(() => {
       {{ pantallaCompleta ? 'Salir de pantalla completa' : 'Volver al modo control' }}
     </button>
 
-    <main class="layout-grid">
+    <main class="layout-grid" :class="{ 'projection-layout': esVentanaProyeccion }">
       <section class="viewer-zone">
         <VisorTerreno
           :terreno="configuracion?.terreno || 'montanas'"
@@ -203,7 +395,7 @@ onUnmounted(() => {
         />
       </section>
 
-      <aside class="side-panel">
+      <aside v-if="!esVentanaProyeccion" class="side-panel">
         <PanelCalibracion
           v-model="calibracion"
           @restablecer="restablecerCalibracion"
@@ -226,5 +418,17 @@ onUnmounted(() => {
         />
       </aside>
     </main>
+
+    <div v-if="esVentanaProyeccion && !controlConectado" class="projection-status" role="status">
+      <template v-if="!canalDisponible">
+        BroadcastChannel no está disponible. Usa el modo proyector de la ventana de control.
+      </template>
+      <template v-else-if="configurado">
+        Ventana de control desconectada. Se conserva el último terreno recibido.
+      </template>
+      <template v-else>
+        Esperando conexión con la ventana de control…
+      </template>
+    </div>
   </div>
 </template>
