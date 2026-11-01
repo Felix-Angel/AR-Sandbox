@@ -4,20 +4,28 @@ const buildUrl = (path) => `${API_BASE_URL}${path}`
 const REQUEST_TIMEOUT_MS = 5000
 
 async function requestJson(url, options = {}) {
+  const { signal: signalExterna, ...opcionesFetch } = options
   const controller = new AbortController()
   let timeoutAlcanzado = false
   const timeoutId = setTimeout(() => {
     timeoutAlcanzado = true
     controller.abort()
   }, REQUEST_TIMEOUT_MS)
+  const cancelarPorSenalExterna = () => controller.abort(signalExterna.reason)
+
+  if (signalExterna?.aborted) {
+    cancelarPorSenalExterna()
+  } else {
+    signalExterna?.addEventListener('abort', cancelarPorSenalExterna, { once: true })
+  }
 
   try {
     const response = await fetch(url, {
       headers: {
         Accept: 'application/json',
-        ...(options.headers || {}),
+        ...(opcionesFetch.headers || {}),
       },
-      ...options,
+      ...opcionesFetch,
       signal: controller.signal,
     })
 
@@ -50,25 +58,26 @@ async function requestJson(url, options = {}) {
     throw error
   } finally {
     clearTimeout(timeoutId)
+    signalExterna?.removeEventListener('abort', cancelarPorSenalExterna)
   }
 }
 
 export const backendService = {
-  async healthCheck() {
-    return requestJson(buildUrl(API_ROUTES.health))
+  async healthCheck({ signal } = {}) {
+    return requestJson(buildUrl(API_ROUTES.health), { signal })
   },
 
-  async getConfiguracion() {
-    return requestJson(buildUrl(API_ROUTES.configuracion))
+  async getConfiguracion({ signal } = {}) {
+    return requestJson(buildUrl(API_ROUTES.configuracion), { signal })
   },
 
-  async getEstado() {
-    return requestJson(buildUrl(API_ROUTES.estado))
+  async getEstado({ signal } = {}) {
+    return requestJson(buildUrl(API_ROUTES.estado), { signal })
   },
 
-  async getConfiguracionSiExiste() {
+  async getConfiguracionSiExiste({ signal } = {}) {
     try {
-      return await this.getConfiguracion()
+      return await this.getConfiguracion({ signal })
     } catch (error) {
       if (String(error.message).includes('Todavía no se ha configurado') || String(error.message).includes('404')) {
         return null

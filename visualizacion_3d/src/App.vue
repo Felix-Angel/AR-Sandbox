@@ -13,6 +13,8 @@ const error = ref('')
 const ultimaActualizacion = ref('Sin datos')
 let intervaloActualizacion = null
 let consultaEnCurso = false
+let componenteActivo = true
+let consultaActiva = null
 
 const configurado = computed(() => Boolean(configuracion.value))
 
@@ -24,6 +26,8 @@ const formatearHora = () =>
   })
 
 async function consultarBackend({ silenciosa = false } = {}) {
+  if (!componenteActivo) return
+
   // Las consultas automáticas no cambian el indicador visible de carga.
   if (consultaEnCurso) {
     if (!silenciosa) cargando.value = true
@@ -31,13 +35,18 @@ async function consultarBackend({ silenciosa = false } = {}) {
   }
 
   consultaEnCurso = true
+  const controller = new AbortController()
+  consultaActiva = controller
   if (!silenciosa) cargando.value = true
   error.value = ''
 
   try {
-    const health = await backendService.healthCheck()
+    const health = await backendService.healthCheck({ signal: controller.signal })
+    if (!componenteActivo || controller.signal.aborted) return
+
     conectado.value = health?.estado === 'activo'
-    const estadoActual = await backendService.getEstado()
+    const estadoActual = await backendService.getEstado({ signal: controller.signal })
+    if (!componenteActivo || controller.signal.aborted) return
 
     if (estadoActual?.configuracion) {
       configuracion.value = estadoActual.configuracion
@@ -49,11 +58,18 @@ async function consultarBackend({ silenciosa = false } = {}) {
 
     ultimaActualizacion.value = formatearHora()
   } catch (err) {
+    if (!componenteActivo || controller.signal.aborted) return
+
     conectado.value = false
     error.value = err instanceof Error ? err.message : 'No se pudo comunicar con FastAPI.'
   } finally {
+    if (consultaActiva === controller) {
+      consultaActiva = null
+    }
     consultaEnCurso = false
-    cargando.value = false
+    if (componenteActivo) {
+      cargando.value = false
+    }
   }
 }
 
@@ -63,10 +79,14 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  componenteActivo = false
+
   if (intervaloActualizacion !== null) {
     window.clearInterval(intervaloActualizacion)
     intervaloActualizacion = null
   }
+
+  consultaActiva?.abort()
 })
 </script>
 
