@@ -12,6 +12,7 @@ const cargando = ref(false)
 const error = ref('')
 const ultimaActualizacion = ref('Sin datos')
 let intervaloActualizacion = null
+let consultaEnCurso = false
 
 const configurado = computed(() => Boolean(configuracion.value))
 
@@ -22,11 +23,15 @@ const formatearHora = () =>
     second: '2-digit',
   })
 
-async function consultarBackend() {
-  // La consulta manual y la periódica comparten esta función; no se solapan.
-  if (cargando.value) return
+async function consultarBackend({ silenciosa = false } = {}) {
+  // Las consultas automáticas no cambian el indicador visible de carga.
+  if (consultaEnCurso) {
+    if (!silenciosa) cargando.value = true
+    return
+  }
 
-  cargando.value = true
+  consultaEnCurso = true
+  if (!silenciosa) cargando.value = true
   error.value = ''
 
   try {
@@ -47,13 +52,14 @@ async function consultarBackend() {
     conectado.value = false
     error.value = err instanceof Error ? err.message : 'No se pudo comunicar con FastAPI.'
   } finally {
+    consultaEnCurso = false
     cargando.value = false
   }
 }
 
 onMounted(() => {
   consultarBackend()
-  intervaloActualizacion = window.setInterval(consultarBackend, 2000)
+  intervaloActualizacion = window.setInterval(() => consultarBackend({ silenciosa: true }), 2000)
 })
 
 onUnmounted(() => {
