@@ -17,7 +17,7 @@ function normalizarAltura(altura) {
   return Math.min(100, Math.max(0, valor))
 }
 
-function mapColor(color) {
+export function obtenerColorTerreno(color) {
   return PALETA_COLORES[color] || '#8ecae6'
 }
 
@@ -52,7 +52,7 @@ function calcularAlturaTerreno({ terreno, altura, x, z }) {
   }
 }
 
-export function crearTerreno({ terreno = 'montanas', color = 'Verde bosque', altura = 50 }) {
+export function crearGeometriaTerreno({ terreno = 'montanas', altura = 50 }) {
   const ancho = 16
   const profundidad = 16
   const segmentos = 80
@@ -65,15 +65,21 @@ export function crearTerreno({ terreno = 'montanas', color = 'Verde bosque', alt
 
   for (let i = 0; i < vertices.count; i += 1) {
     const x = vertices.getX(i)
-    const z = vertices.getY(i)
+    const z = vertices.getZ(i)
     const y = calcularAlturaTerreno({ terreno, altura: nivelBase, x, z })
     vertices.setY(i, y)
   }
 
   geometria.computeVertexNormals()
 
+  return geometria
+}
+
+export function crearTerreno({ terreno = 'montanas', color = 'Verde bosque', altura = 50 }) {
+  const geometria = crearGeometriaTerreno({ terreno, altura })
+
   const material = new THREE.MeshStandardMaterial({
-    color: mapColor(color),
+    color: obtenerColorTerreno(color),
     roughness: 0.9,
     metalness: 0.08,
   })
@@ -96,6 +102,30 @@ export function crearTerreno({ terreno = 'montanas', color = 'Verde bosque', alt
   const grupo = new THREE.Group()
   grupo.add(terrenoMesh)
   grupo.add(base)
+
+  const liberarRecursos = () => {
+    grupo.removeEventListener('removed', liberarRecursos)
+
+    const geometrias = new Set()
+    const materiales = new Set()
+
+    grupo.traverse((objeto) => {
+      if (objeto.geometry) {
+        geometrias.add(objeto.geometry)
+      }
+
+      if (Array.isArray(objeto.material)) {
+        objeto.material.forEach((material) => materiales.add(material))
+      } else if (objeto.material) {
+        materiales.add(objeto.material)
+      }
+    })
+
+    geometrias.forEach((geometriaAnterior) => geometriaAnterior.dispose())
+    materiales.forEach((materialAnterior) => materialAnterior.dispose())
+  }
+
+  grupo.addEventListener('removed', liberarRecursos)
 
   return grupo
 }
