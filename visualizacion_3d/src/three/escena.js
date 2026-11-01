@@ -17,6 +17,8 @@ export function crearEscena(contendor, configuracionInicial = {}) {
   renderer.setSize(anchoInicial, altoInicial)
   renderer.shadowMap.enabled = true
   renderer.shadowMap.type = THREE.PCFSoftShadowMap
+  renderer.shadowMap.autoUpdate = false
+  renderer.shadowMap.needsUpdate = true
   contendor.appendChild(renderer.domElement)
 
   const hemiLight = new THREE.HemisphereLight('#dfe9ff', '#1a2433', 1.25)
@@ -49,6 +51,25 @@ export function crearEscena(contendor, configuracionInicial = {}) {
   controls.maxDistance = 34
   controls.maxPolarAngle = Math.PI * 0.48
   controls.target.set(0, 2, 0)
+
+  let animationFrameId = null
+  let disposed = false
+
+  const renderFrame = () => {
+    animationFrameId = null
+    if (disposed) return
+
+    controls.update()
+    renderer.render(scene, camera)
+  }
+
+  const solicitarRender = () => {
+    if (disposed || animationFrameId !== null) return
+    animationFrameId = window.requestAnimationFrame(renderFrame)
+  }
+
+  const alCambiarControles = () => solicitarRender()
+  controls.addEventListener('change', alCambiarControles)
 
   const terrainGroup = new THREE.Group()
   scene.add(terrainGroup)
@@ -97,6 +118,9 @@ export function crearEscena(contendor, configuracionInicial = {}) {
   let configuracionAplicada = datosIniciales ? datosTerreno : null
 
   const limpiarTerreno = () => {
+    const cambioVisibilidad = terrenoMesh.visible || baseTerreno.visible
+    const habiaGeometria = Boolean(terrenoMesh.geometry)
+
     if (terrenoMesh.geometry) {
       terrenoMesh.geometry.dispose()
       terrenoMesh.geometry = null
@@ -105,6 +129,11 @@ export function crearEscena(contendor, configuracionInicial = {}) {
     terrenoMesh.visible = false
     baseTerreno.visible = false
     configuracionAplicada = null
+
+    if (cambioVisibilidad || habiaGeometria) {
+      renderer.shadowMap.needsUpdate = true
+      solicitarRender()
+    }
   }
 
   const actualizarTerreno = (configuracion) => {
@@ -118,6 +147,10 @@ export function crearEscena(contendor, configuracionInicial = {}) {
     const cambioGeometria = !terrenoMesh.geometry || !configuracionAplicada
       || datos.terreno !== configuracionAplicada.terreno
       || datos.altura !== configuracionAplicada.altura
+    const cambioColor = !configuracionAplicada || datos.color !== configuracionAplicada.color
+    const cambioVisibilidad = !terrenoMesh.visible || !baseTerreno.visible
+
+    if (!cambioGeometria && !cambioColor && !cambioVisibilidad) return
 
     if (cambioGeometria) {
       const geometriaAnterior = terrenoMesh.geometry
@@ -125,13 +158,18 @@ export function crearEscena(contendor, configuracionInicial = {}) {
       geometriaAnterior?.dispose()
     }
 
-    if (!configuracionAplicada || datos.color !== configuracionAplicada.color) {
+    if (cambioColor) {
       terrenoMesh.material.color.set(obtenerColorTerreno(datos.color))
     }
 
     terrenoMesh.visible = true
     baseTerreno.visible = true
     configuracionAplicada = datos
+
+    if (cambioGeometria || cambioVisibilidad) {
+      renderer.shadowMap.needsUpdate = true
+    }
+    solicitarRender()
   }
 
   let anchoRenderizado = anchoInicial
@@ -149,16 +187,11 @@ export function crearEscena(contendor, configuracionInicial = {}) {
     camera.aspect = ancho / alto
     camera.updateProjectionMatrix()
     renderer.setSize(ancho, alto)
+    solicitarRender()
   })
   resizeObserver.observe(contendor)
 
-  let animationFrameId = 0
-  const loop = () => {
-    controls.update()
-    renderer.render(scene, camera)
-    animationFrameId = window.requestAnimationFrame(loop)
-  }
-  loop()
+  solicitarRender()
 
   return {
     scene,
@@ -168,7 +201,12 @@ export function crearEscena(contendor, configuracionInicial = {}) {
     actualizarTerreno,
     limpiarTerreno,
     dispose() {
-      window.cancelAnimationFrame(animationFrameId)
+      disposed = true
+      if (animationFrameId !== null) {
+        window.cancelAnimationFrame(animationFrameId)
+        animationFrameId = null
+      }
+      controls.removeEventListener('change', alCambiarControles)
       resizeObserver.disconnect()
       controls.dispose()
       terrainGroup.clear()
