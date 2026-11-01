@@ -11,6 +11,9 @@ const conectado = ref(false)
 const cargando = ref(false)
 const error = ref('')
 const ultimaActualizacion = ref('Sin datos')
+const contenedorApp = ref(null)
+const modoProyector = ref(false)
+const pantallaCompleta = ref(false)
 let intervaloActualizacion = null
 let consultaEnCurso = false
 let componenteActivo = true
@@ -73,13 +76,60 @@ async function consultarBackend({ silenciosa = false } = {}) {
   }
 }
 
+async function activarModoProyector() {
+  modoProyector.value = true
+
+  const elemento = contenedorApp.value
+  if (!elemento || typeof elemento.requestFullscreen !== 'function') {
+    pantallaCompleta.value = false
+    return
+  }
+
+  try {
+    await elemento.requestFullscreen()
+    pantallaCompleta.value = document.fullscreenElement === elemento
+  } catch {
+    // El modo proyector sigue disponible aunque el navegador rechace fullscreen.
+    pantallaCompleta.value = false
+  }
+}
+
+function salirModoProyector() {
+  modoProyector.value = false
+  const salirDePantallaCompleta = document.fullscreenElement === contenedorApp.value
+  pantallaCompleta.value = false
+
+  if (salirDePantallaCompleta && typeof document.exitFullscreen === 'function') {
+    document.exitFullscreen().catch(() => {})
+  }
+}
+
+function sincronizarPantallaCompleta() {
+  pantallaCompleta.value = document.fullscreenElement === contenedorApp.value
+
+  // Escape u otra salida del modo fullscreen también devuelve la interfaz al modo control.
+  if (modoProyector.value && !pantallaCompleta.value) {
+    modoProyector.value = false
+  }
+}
+
+function manejarTecla(evento) {
+  if (evento.key === 'Escape' && modoProyector.value) {
+    salirModoProyector()
+  }
+}
+
 onMounted(() => {
+  document.addEventListener('fullscreenchange', sincronizarPantallaCompleta)
+  document.addEventListener('keydown', manejarTecla)
   consultarBackend()
   intervaloActualizacion = window.setInterval(() => consultarBackend({ silenciosa: true }), 2000)
 })
 
 onUnmounted(() => {
   componenteActivo = false
+  document.removeEventListener('fullscreenchange', sincronizarPantallaCompleta)
+  document.removeEventListener('keydown', manejarTecla)
 
   if (intervaloActualizacion !== null) {
     window.clearInterval(intervaloActualizacion)
@@ -91,16 +141,29 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="app-shell">
+  <div ref="contenedorApp" class="app-shell" :class="{ 'projector-mode': modoProyector }">
     <header class="topbar">
       <div>
         <p class="eyebrow">AR Sandbox</p>
         <h1>Visualización 3D</h1>
       </div>
-      <button class="refresh-button" @click="consultarBackend" :disabled="cargando">
-        {{ cargando ? 'Consultando...' : 'Actualizar' }}
-      </button>
+      <div class="topbar-actions">
+        <button class="projector-button" @click="activarModoProyector">Modo proyector</button>
+        <button class="refresh-button" @click="consultarBackend" :disabled="cargando">
+          {{ cargando ? 'Consultando...' : 'Actualizar' }}
+        </button>
+      </div>
     </header>
+
+    <button
+      v-if="modoProyector"
+      class="projector-exit-button"
+      type="button"
+      :aria-pressed="pantallaCompleta"
+      @click="salirModoProyector"
+    >
+      {{ pantallaCompleta ? 'Salir de pantalla completa' : 'Volver al modo control' }}
+    </button>
 
     <main class="layout-grid">
       <section class="viewer-zone">

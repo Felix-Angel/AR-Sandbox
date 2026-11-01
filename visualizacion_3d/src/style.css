@@ -63,6 +63,7 @@ h1 {
 }
 
 .refresh-button,
+.projector-button,
 .update-button {
   border: none;
   border-radius: 10px;
@@ -75,11 +76,13 @@ h1 {
 }
 
 .refresh-button:hover,
+.projector-button:hover,
 .update-button:hover {
   transform: translateY(-1px);
 }
 
 .refresh-button:disabled,
+.projector-button:disabled,
 .update-button:disabled {
   opacity: 0.6;
   cursor: wait;
@@ -276,6 +279,85 @@ h1 {
   font-size: 0.9rem;
 }
 
+.topbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.projector-button {
+  background: linear-gradient(135deg, #a7f3d0, #34d399);
+  color: #052e24;
+}
+
+.projector-mode {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: #050b14;
+}
+
+.projector-mode .topbar,
+.projector-mode .side-panel,
+.projector-mode .viewer-header,
+.projector-mode .viewer-empty-message {
+  display: none;
+}
+
+.projector-mode .layout-grid {
+  display: block;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+.projector-mode .viewer-zone,
+.projector-mode .viewer-panel,
+.projector-mode .viewer-canvas {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.projector-mode .viewer-panel {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
+.projector-mode .viewer-canvas {
+  border: 0;
+  border-radius: 0;
+  background: #050b14;
+}
+
+.projector-exit-button {
+  position: fixed;
+  z-index: 1001;
+  top: max(16px, env(safe-area-inset-top));
+  right: max(16px, env(safe-area-inset-right));
+  border: 1px solid rgba(226, 232, 240, 0.45);
+  border-radius: 10px;
+  padding: 0.7rem 1rem;
+  color: #f8fafc;
+  background: rgba(8, 17, 29, 0.82);
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+}
+
+.projector-exit-button:hover {
+  background: rgba(30, 41, 59, 0.95);
+}
+
 @media (max-width: 980px) {
   .layout-grid {
     grid-template-columns: 1fr;
@@ -292,5 +374,18 @@ h1 {
 
   .viewer-canvas {
     min-height: 420px;
+  }
+
+  .topbar-actions {
+    width: 100%;
+  }
+}
+
+@media (max-width: 520px) {
+  .projector-mode .projector-exit-button {
+    top: max(10px, env(safe-area-inset-top));
+    right: max(10px, env(safe-area-inset-right));
+    padding: 0.55rem 0.75rem;
+    font-size: 0.85rem;
   }
 }
