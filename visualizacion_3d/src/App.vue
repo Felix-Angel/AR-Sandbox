@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import EstadoConexion from './components/EstadoConexion.vue'
 import PanelInformacion from './components/PanelInformacion.vue'
 import VisorTerreno from './components/VisorTerreno.vue'
@@ -11,6 +11,7 @@ const conectado = ref(false)
 const cargando = ref(false)
 const error = ref('')
 const ultimaActualizacion = ref('Sin datos')
+let intervaloActualizacion = null
 
 const configurado = computed(() => Boolean(configuracion.value))
 
@@ -22,6 +23,9 @@ const formatearHora = () =>
   })
 
 async function consultarBackend() {
+  // La consulta manual y la periódica comparten esta función; no se solapan.
+  if (cargando.value) return
+
   cargando.value = true
   error.value = ''
 
@@ -41,8 +45,6 @@ async function consultarBackend() {
     ultimaActualizacion.value = formatearHora()
   } catch (err) {
     conectado.value = false
-    configuracion.value = null
-    estado.value = 'sin_configurar'
     error.value = err instanceof Error ? err.message : 'No se pudo comunicar con FastAPI.'
   } finally {
     cargando.value = false
@@ -51,6 +53,14 @@ async function consultarBackend() {
 
 onMounted(() => {
   consultarBackend()
+  intervaloActualizacion = window.setInterval(consultarBackend, 2000)
+})
+
+onUnmounted(() => {
+  if (intervaloActualizacion !== null) {
+    window.clearInterval(intervaloActualizacion)
+    intervaloActualizacion = null
+  }
 })
 </script>
 
