@@ -54,13 +54,25 @@ export function crearEscena(contendor, configuracionInicial = {}) {
 
   let animationFrameId = null
   let disposed = false
+  let renderEnCurso = false
+  let aplicandoEstadoCamara = false
+
+  const dibujarEscena = () => {
+    camera.updateMatrixWorld(true)
+    renderer.render(scene, camera)
+  }
 
   const renderFrame = () => {
     animationFrameId = null
     if (disposed) return
 
-    controls.update()
-    renderer.render(scene, camera)
+    renderEnCurso = true
+    try {
+      controls.update()
+      dibujarEscena()
+    } finally {
+      renderEnCurso = false
+    }
   }
 
   const solicitarRender = () => {
@@ -68,7 +80,17 @@ export function crearEscena(contendor, configuracionInicial = {}) {
     animationFrameId = window.requestAnimationFrame(renderFrame)
   }
 
-  const alCambiarControles = () => solicitarRender()
+  const alCambiarControles = () => {
+    // OrbitControls cambia posición y cuaternión; sincroniza su matriz antes de invalidar el render.
+    if (!renderEnCurso && !aplicandoEstadoCamara) {
+      if (animationFrameId !== null) {
+        window.cancelAnimationFrame(animationFrameId)
+        animationFrameId = null
+      }
+      dibujarEscena()
+    }
+    solicitarRender()
+  }
   controls.addEventListener('change', alCambiarControles)
 
   const terrainGroup = new THREE.Group()
@@ -258,6 +280,59 @@ export function crearEscena(contendor, configuracionInicial = {}) {
   })
   resizeObserver.observe(contendor)
 
+  const obtenerEstadoCamara = () => ({
+    posicion: {
+      x: camera.position.x,
+      y: camera.position.y,
+      z: camera.position.z,
+    },
+    objetivo: {
+      x: controls.target.x,
+      y: controls.target.y,
+      z: controls.target.z,
+    },
+    orientacion: {
+      x: camera.quaternion.x,
+      y: camera.quaternion.y,
+      z: camera.quaternion.z,
+      w: camera.quaternion.w,
+    },
+    zoom: camera.zoom,
+    distancia: camera.position.distanceTo(controls.target),
+  })
+
+  const aplicarEstadoCamara = (estadoCamara) => {
+    const posicion = estadoCamara?.posicion
+    const objetivo = estadoCamara?.objetivo
+    const orientacion = estadoCamara?.orientacion
+    const componentes = [posicion?.x, posicion?.y, posicion?.z, objetivo?.x, objetivo?.y, objetivo?.z]
+
+    if (!componentes.every(Number.isFinite)) return false
+
+    controls.target.set(objetivo.x, objetivo.y, objetivo.z)
+    camera.position.set(posicion.x, posicion.y, posicion.z)
+
+    if (Number.isFinite(estadoCamara.zoom) && estadoCamara.zoom > 0) {
+      camera.zoom = estadoCamara.zoom
+      camera.updateProjectionMatrix()
+    }
+
+    aplicandoEstadoCamara = true
+    try {
+      controls.update()
+
+      if ([orientacion?.x, orientacion?.y, orientacion?.z, orientacion?.w].every(Number.isFinite)) {
+        camera.quaternion.set(orientacion.x, orientacion.y, orientacion.z, orientacion.w).normalize()
+        camera.updateMatrixWorld(true)
+      }
+    } finally {
+      aplicandoEstadoCamara = false
+    }
+
+    solicitarRender()
+    return true
+  }
+
   solicitarRender()
 
   return {
@@ -267,6 +342,8 @@ export function crearEscena(contendor, configuracionInicial = {}) {
     controls,
     actualizarTerreno,
     actualizarCalibracion,
+    obtenerEstadoCamara,
+    aplicarEstadoCamara,
     limpiarTerreno,
     dispose() {
       disposed = true

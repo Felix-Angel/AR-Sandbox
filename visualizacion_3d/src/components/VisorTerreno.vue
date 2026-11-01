@@ -27,10 +27,28 @@ const props = defineProps({
     type: Object,
     default: () => ({}),
   },
+  estadoCamara: {
+    type: Object,
+    default: null,
+  },
 })
+
+const emit = defineEmits(['camera-ready', 'camera-change'])
 
 const contenedor = ref(null)
 let escena = null
+let ultimoEstadoCamaraEmitido = ''
+let ultimoEstadoCamaraAplicado = ''
+
+const emitirEstadoCamara = () => {
+  if (!escena) return
+  const estadoCamara = escena.obtenerEstadoCamara()
+  const serializado = JSON.stringify(estadoCamara)
+  if (serializado === ultimoEstadoCamaraEmitido) return
+
+  ultimoEstadoCamaraEmitido = serializado
+  emit('camera-change', estadoCamara)
+}
 
 const actualizarVisualizacion = () => {
   if (!escena) {
@@ -58,6 +76,8 @@ onMounted(() => {
     })
     escena.actualizarCalibracion(props.calibracion)
     actualizarVisualizacion()
+    escena.controls.addEventListener('change', emitirEstadoCamara)
+    emit('camera-ready', escena.obtenerEstadoCamara())
   }
 })
 
@@ -77,8 +97,23 @@ watch(
   { deep: true },
 )
 
+watch(
+  () => props.estadoCamara,
+  (estadoCamara) => {
+    if (!escena || !estadoCamara) return
+    const serializado = JSON.stringify(estadoCamara)
+    if (serializado === ultimoEstadoCamaraAplicado) return
+
+    if (escena.aplicarEstadoCamara(estadoCamara)) {
+      ultimoEstadoCamaraAplicado = serializado
+    }
+  },
+  { deep: true },
+)
+
 onBeforeUnmount(() => {
   if (escena) {
+    escena.controls.removeEventListener('change', emitirEstadoCamara)
     escena.dispose()
     escena = null
   }

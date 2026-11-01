@@ -23,6 +23,7 @@ const controlConectado = ref(false)
 const proyeccionActiva = ref(false)
 const errorAperturaProyeccion = ref('')
 const ventanaProyeccion = shallowRef(null)
+const estadoCamara = ref(null)
 const calibracion = ref({
   superficie: 'caja',
   orientacion: 'horizontal',
@@ -45,6 +46,7 @@ let intervaloVigilanciaControl = null
 let intervaloCierreVentana = null
 let ultimaActividadControl = 0
 let ultimaInstantaneaEnviada = ''
+let ultimaCamaraEnviada = ''
 
 const configurado = computed(() => Boolean(configuracion.value))
 
@@ -168,6 +170,9 @@ function crearInstantaneaProyeccion() {
     estado: estado.value,
     conectado: conectado.value,
     calibracion: JSON.parse(JSON.stringify(calibracion.value)),
+    estadoCamara: estadoCamara.value
+      ? JSON.parse(JSON.stringify(estadoCamara.value))
+      : null,
   }
 }
 
@@ -199,6 +204,13 @@ function manejarMensajeProyector(mensaje) {
     return
   }
 
+  if (mensaje.tipo === 'camera-update' && mensaje.datos?.estadoCamara) {
+    estadoCamara.value = mensaje.datos.estadoCamara
+    ultimaActividadControl = Date.now()
+    controlConectado.value = true
+    return
+  }
+
   if (mensaje.tipo === 'state-snapshot' && mensaje.datos && typeof mensaje.datos === 'object') {
     const datos = mensaje.datos
     if (!('configuracion' in datos) || typeof datos.estado !== 'string'
@@ -210,6 +222,9 @@ function manejarMensajeProyector(mensaje) {
     estado.value = datos.estado
     conectado.value = datos.conectado
     calibracion.value = datos.calibracion
+    if (datos.estadoCamara) {
+      estadoCamara.value = datos.estadoCamara
+    }
     ultimaActividadControl = Date.now()
     controlConectado.value = true
 
@@ -218,6 +233,24 @@ function manejarMensajeProyector(mensaje) {
       intervaloAnuncioProyeccion = null
     }
   }
+}
+
+function recibirCamaraInicial(estadoRecibido) {
+  if (esVentanaProyeccion || !estadoRecibido) return
+  const serializado = JSON.stringify(estadoRecibido)
+  estadoCamara.value = JSON.parse(serializado)
+  ultimaCamaraEnviada = serializado
+  enviarInstantaneaProyeccion(true)
+}
+
+function publicarCambioCamara(estadoRecibido) {
+  if (esVentanaProyeccion || !estadoRecibido) return
+  const serializado = JSON.stringify(estadoRecibido)
+  if (serializado === ultimaCamaraEnviada) return
+
+  ultimaCamaraEnviada = serializado
+  estadoCamara.value = JSON.parse(serializado)
+  canalProyector?.enviar('camera-update', { estadoCamara: estadoCamara.value })
 }
 
 function abrirVentanaProyeccion() {
@@ -392,6 +425,9 @@ onUnmounted(() => {
           :estado="estado"
           :configurado="configurado"
           :calibracion="calibracion"
+          :estado-camara="esVentanaProyeccion ? estadoCamara : null"
+          @camera-ready="recibirCamaraInicial"
+          @camera-change="publicarCambioCamara"
         />
       </section>
 
