@@ -8,11 +8,13 @@ export function crearEscena(contendor, configuracionInicial = {}) {
   scene.background = new THREE.Color('#0b1220')
   scene.fog = new THREE.Fog('#0b1220', 18, 60)
 
-  const camera = crearCamara(contendor.clientWidth, contendor.clientHeight)
+  const anchoInicial = contendor.clientWidth || 1
+  const altoInicial = contendor.clientHeight || 1
+  const camera = crearCamara(anchoInicial, altoInicial)
 
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-  renderer.setSize(contendor.clientWidth, contendor.clientHeight)
+  renderer.setSize(anchoInicial, altoInicial)
   renderer.shadowMap.enabled = true
   renderer.shadowMap.type = THREE.PCFSoftShadowMap
   contendor.appendChild(renderer.domElement)
@@ -132,14 +134,23 @@ export function crearEscena(contendor, configuracionInicial = {}) {
     configuracionAplicada = datos
   }
 
-  const resize = () => {
-    if (!contendor) return
-    camera.aspect = contendor.clientWidth / contendor.clientHeight
-    camera.updateProjectionMatrix()
-    renderer.setSize(contendor.clientWidth, contendor.clientHeight)
-  }
+  let anchoRenderizado = anchoInicial
+  let altoRenderizado = altoInicial
 
-  window.addEventListener('resize', resize)
+  const resizeObserver = new ResizeObserver(() => {
+    const ancho = contendor.clientWidth
+    const alto = contendor.clientHeight
+
+    if (ancho === 0 || alto === 0) return
+    if (ancho === anchoRenderizado && alto === altoRenderizado) return
+
+    anchoRenderizado = ancho
+    altoRenderizado = alto
+    camera.aspect = ancho / alto
+    camera.updateProjectionMatrix()
+    renderer.setSize(ancho, alto)
+  })
+  resizeObserver.observe(contendor)
 
   let animationFrameId = 0
   const loop = () => {
@@ -158,7 +169,7 @@ export function crearEscena(contendor, configuracionInicial = {}) {
     limpiarTerreno,
     dispose() {
       window.cancelAnimationFrame(animationFrameId)
-      window.removeEventListener('resize', resize)
+      resizeObserver.disconnect()
       controls.dispose()
       terrainGroup.clear()
       renderer.dispose()
