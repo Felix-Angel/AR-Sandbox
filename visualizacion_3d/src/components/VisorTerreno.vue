@@ -23,6 +23,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  calibracion: {
+    type: Object,
+    default: () => ({}),
+  },
 })
 
 const contenedor = ref(null)
@@ -52,6 +56,7 @@ onMounted(() => {
       color: props.color,
       altura: props.altura,
     })
+    escena.actualizarCalibracion(props.calibracion)
     actualizarVisualizacion()
   }
 })
@@ -60,6 +65,14 @@ watch(
   () => [props.terreno, props.color, props.altura, props.configurado],
   () => {
     actualizarVisualizacion()
+  },
+  { deep: true },
+)
+
+watch(
+  () => props.calibracion,
+  (calibracion) => {
+    escena?.actualizarCalibracion(calibracion)
   },
   { deep: true },
 )

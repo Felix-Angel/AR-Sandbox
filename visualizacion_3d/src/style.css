@@ -102,7 +102,8 @@ h1 {
 
 .viewer-panel,
 .info-panel,
-.status-panel {
+.status-panel,
+.calibration-panel {
   background: rgba(15, 23, 42, 0.82);
   border: 1px solid rgba(148, 163, 184, 0.2);
   border-radius: 20px;
@@ -154,8 +155,71 @@ h1 {
 }
 
 .info-panel,
-.status-panel {
+.status-panel,
+.calibration-panel {
   padding: 18px;
+}
+
+.calibration-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.calibration-fields-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.calibration-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  color: #cbd5e1;
+  font-size: 0.82rem;
+}
+
+.calibration-field input[type='number'],
+.calibration-field select {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 8px;
+  padding: 0.55rem 0.65rem;
+  color: #f8fafc;
+  background: #172337;
+}
+
+.calibration-field input[type='range'] {
+  width: 100%;
+  accent-color: #38bdf8;
+}
+
+.calibration-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #dbeafe;
+  font-size: 0.85rem;
+}
+
+.calibration-checkbox input {
+  accent-color: #38bdf8;
+}
+
+.calibration-reset-button {
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 9px;
+  padding: 0.65rem 0.9rem;
+  color: #e2e8f0;
+  background: rgba(30, 41, 59, 0.8);
+  cursor: pointer;
+}
+
+.calibration-reset-button:hover {
+  background: rgba(51, 65, 85, 0.95);
 }
 
 .panel-title {

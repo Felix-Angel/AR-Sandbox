@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import EstadoConexion from './components/EstadoConexion.vue'
+import PanelCalibracion from './components/PanelCalibracion.vue'
 import PanelInformacion from './components/PanelInformacion.vue'
 import VisorTerreno from './components/VisorTerreno.vue'
 import { backendService } from './services/backendService.js'
@@ -14,6 +15,17 @@ const ultimaActualizacion = ref('Sin datos')
 const contenedorApp = ref(null)
 const modoProyector = ref(false)
 const pantallaCompleta = ref(false)
+const calibracion = ref({
+  superficie: 'caja',
+  orientacion: 'horizontal',
+  ancho: 21.6,
+  alto: 21.6,
+  desplazamientoX: 0,
+  desplazamientoY: 0,
+  escala: 1,
+  rotacion: 0,
+  mostrarCuadricula: false,
+})
 let intervaloActualizacion = null
 let consultaEnCurso = false
 let componenteActivo = true
@@ -119,6 +131,20 @@ function manejarTecla(evento) {
   }
 }
 
+function restablecerCalibracion() {
+  calibracion.value = {
+    superficie: 'caja',
+    orientacion: 'horizontal',
+    ancho: 21.6,
+    alto: 21.6,
+    desplazamientoX: 0,
+    desplazamientoY: 0,
+    escala: 1,
+    rotacion: 0,
+    mostrarCuadricula: false,
+  }
+}
+
 onMounted(() => {
   document.addEventListener('fullscreenchange', sincronizarPantallaCompleta)
   document.addEventListener('keydown', manejarTecla)
@@ -173,10 +199,16 @@ onUnmounted(() => {
           :altura="Number(configuracion?.altura ?? 0)"
           :estado="estado"
           :configurado="configurado"
+          :calibracion="calibracion"
         />
       </section>
 
       <aside class="side-panel">
+        <PanelCalibracion
+          v-model="calibracion"
+          @restablecer="restablecerCalibracion"
+        />
+
         <PanelInformacion
           :configuracion="configuracion"
           :estado="estado"

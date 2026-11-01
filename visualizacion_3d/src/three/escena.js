@@ -72,7 +72,73 @@ export function crearEscena(contendor, configuracionInicial = {}) {
   controls.addEventListener('change', alCambiarControles)
 
   const terrainGroup = new THREE.Group()
-  scene.add(terrainGroup)
+  const surfaceGroup = new THREE.Group()
+  const calibrationGroup = new THREE.Group()
+  scene.add(surfaceGroup)
+  surfaceGroup.add(calibrationGroup)
+  calibrationGroup.add(terrainGroup)
+
+  const gridHelper = new THREE.GridHelper(21.6, 16, '#7dd3fc', '#38bdf8')
+  gridHelper.visible = false
+  gridHelper.position.y = 0.02
+  gridHelper.castShadow = false
+  gridHelper.receiveShadow = false
+  const gridMaterials = Array.isArray(gridHelper.material) ? gridHelper.material : [gridHelper.material]
+  gridMaterials.forEach((material) => {
+    material.transparent = true
+    material.opacity = 0.72
+    material.depthTest = false
+  })
+  gridHelper.renderOrder = 2
+  calibrationGroup.add(gridHelper)
+  let calibracionAplicada = null
+
+  const actualizarCalibracion = (calibracion = {}) => {
+    const ancho = Math.max(1, Number(calibracion.ancho) || 21.6)
+    const alto = Math.max(1, Number(calibracion.alto) || 21.6)
+    const escala = Math.min(4, Math.max(0.1, Number(calibracion.escala) || 1))
+    const desplazamientoX = Number(calibracion.desplazamientoX) || 0
+    const desplazamientoY = Number(calibracion.desplazamientoY) || 0
+    const rotacion = Number(calibracion.rotacion) || 0
+    const pizarronVertical = calibracion.superficie === 'pizarron'
+      && calibracion.orientacion === 'vertical'
+    const nuevaCalibracion = {
+      superficie: calibracion.superficie || 'caja',
+      orientacion: pizarronVertical ? 'vertical' : 'horizontal',
+      ancho,
+      alto,
+      desplazamientoX,
+      desplazamientoY,
+      escala,
+      rotacion,
+      mostrarCuadricula: Boolean(calibracion.mostrarCuadricula),
+    }
+    const cambioTransformacion = !calibracionAplicada
+      || nuevaCalibracion.superficie !== calibracionAplicada.superficie
+      || nuevaCalibracion.orientacion !== calibracionAplicada.orientacion
+      || nuevaCalibracion.ancho !== calibracionAplicada.ancho
+      || nuevaCalibracion.alto !== calibracionAplicada.alto
+      || nuevaCalibracion.desplazamientoX !== calibracionAplicada.desplazamientoX
+      || nuevaCalibracion.desplazamientoY !== calibracionAplicada.desplazamientoY
+      || nuevaCalibracion.escala !== calibracionAplicada.escala
+      || nuevaCalibracion.rotacion !== calibracionAplicada.rotacion
+    const cambioCuadricula = !calibracionAplicada
+      || nuevaCalibracion.mostrarCuadricula !== calibracionAplicada.mostrarCuadricula
+
+    if (!cambioTransformacion && !cambioCuadricula) return
+
+    surfaceGroup.rotation.x = pizarronVertical ? -Math.PI / 2 : 0
+    calibrationGroup.position.set(desplazamientoX, 0, desplazamientoY)
+    calibrationGroup.rotation.y = THREE.MathUtils.degToRad(rotacion)
+    calibrationGroup.scale.set((ancho / 21.6) * escala, escala, (alto / 21.6) * escala)
+    gridHelper.visible = nuevaCalibracion.mostrarCuadricula
+
+    if (cambioTransformacion) {
+      renderer.shadowMap.needsUpdate = true
+    }
+    calibracionAplicada = nuevaCalibracion
+    solicitarRender()
+  }
 
   const normalizarConfiguracion = (configuracion) => {
     if (!configuracion?.terreno || !configuracion?.color || configuracion.altura === undefined || configuracion.altura === null) {
@@ -116,6 +182,7 @@ export function crearEscena(contendor, configuracionInicial = {}) {
   }
 
   let configuracionAplicada = datosIniciales ? datosTerreno : null
+  actualizarCalibracion()
 
   const limpiarTerreno = () => {
     const cambioVisibilidad = terrenoMesh.visible || baseTerreno.visible
@@ -199,6 +266,7 @@ export function crearEscena(contendor, configuracionInicial = {}) {
     renderer,
     controls,
     actualizarTerreno,
+    actualizarCalibracion,
     limpiarTerreno,
     dispose() {
       disposed = true
@@ -210,6 +278,12 @@ export function crearEscena(contendor, configuracionInicial = {}) {
       resizeObserver.disconnect()
       controls.dispose()
       terrainGroup.clear()
+      gridHelper.geometry.dispose()
+      if (Array.isArray(gridHelper.material)) {
+        gridHelper.material.forEach((material) => material.dispose())
+      } else {
+        gridHelper.material.dispose()
+      }
       renderer.dispose()
       contendor.removeChild(renderer.domElement)
     },
