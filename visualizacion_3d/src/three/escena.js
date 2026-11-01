@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { crearCamara } from './camara.js'
-import { crearTerreno } from './terrenos.js'
+import { crearGeometriaTerreno, crearTerreno, obtenerColorTerreno } from './terrenos.js'
 
 export function crearEscena(contendor, configuracionInicial = {}) {
   const scene = new THREE.Scene()
@@ -51,43 +51,86 @@ export function crearEscena(contendor, configuracionInicial = {}) {
   const terrainGroup = new THREE.Group()
   scene.add(terrainGroup)
 
-  const actualizarTerreno = (configuracion) => {
-    terrainGroup.clear()
+  const normalizarConfiguracion = (configuracion) => {
+    if (!configuracion?.terreno || !configuracion?.color || configuracion.altura === undefined || configuracion.altura === null) {
+      return null
+    }
 
-    if (!configuracion || !configuracion.terreno || !configuracion.color || configuracion.altura === undefined || configuracion.altura === null) {
-      controls.target.set(0, 2, 0)
-      camera.position.set(12, 12, 18)
-      camera.lookAt(0, 1, 0)
+    const altura = Number(configuracion.altura)
+    if (!Number.isFinite(altura)) {
+      return null
+    }
+
+    return {
+      terreno: configuracion.terreno,
+      color: configuracion.color,
+      altura,
+    }
+  }
+
+  const datosIniciales = normalizarConfiguracion(configuracionInicial)
+  const datosTerreno = datosIniciales || { terreno: 'montanas', color: 'Verde bosque', altura: 50 }
+  const grupoTerreno = crearTerreno(datosTerreno)
+  const terrenoMesh = grupoTerreno.children[0]
+  const baseTerreno = grupoTerreno.children[1]
+  terrainGroup.add(grupoTerreno)
+
+  if (!datosIniciales) {
+    terrenoMesh.geometry.dispose()
+    terrenoMesh.geometry = null
+    terrenoMesh.visible = false
+    baseTerreno.visible = false
+  } else {
+    const bounds = new THREE.Box3().setFromObject(grupoTerreno)
+    const center = bounds.getCenter(new THREE.Vector3())
+    const size = bounds.getSize(new THREE.Vector3())
+    const targetInicial = new THREE.Vector3(center.x, center.y + size.y * 0.25, center.z)
+
+    controls.target.copy(targetInicial)
+    camera.position.set(12, 12, 18)
+    camera.lookAt(targetInicial)
+    controls.update()
+  }
+
+  let configuracionAplicada = datosIniciales ? datosTerreno : null
+
+  const limpiarTerreno = () => {
+    if (terrenoMesh.geometry) {
+      terrenoMesh.geometry.dispose()
+      terrenoMesh.geometry = null
+    }
+
+    terrenoMesh.visible = false
+    baseTerreno.visible = false
+    configuracionAplicada = null
+  }
+
+  const actualizarTerreno = (configuracion) => {
+    const datos = normalizarConfiguracion(configuracion)
+
+    if (!datos) {
+      limpiarTerreno()
       return
     }
 
-    const datos = {
-      terreno: configuracion.terreno,
-      color: configuracion.color,
-      altura: Number(configuracion.altura),
+    const cambioGeometria = !terrenoMesh.geometry || !configuracionAplicada
+      || datos.terreno !== configuracionAplicada.terreno
+      || datos.altura !== configuracionAplicada.altura
+
+    if (cambioGeometria) {
+      const geometriaAnterior = terrenoMesh.geometry
+      terrenoMesh.geometry = crearGeometriaTerreno(datos)
+      geometriaAnterior?.dispose()
     }
 
-    const terreno = crearTerreno(datos)
-    terrainGroup.add(terreno)
+    if (!configuracionAplicada || datos.color !== configuracionAplicada.color) {
+      terrenoMesh.material.color.set(obtenerColorTerreno(datos.color))
+    }
 
-    const bounds = new THREE.Box3().setFromObject(terreno)
-    const center = bounds.getCenter(new THREE.Vector3())
-    const size = bounds.getSize(new THREE.Vector3())
-
-    const target = new THREE.Vector3(center.x, center.y + size.y * 0.25, center.z)
-    controls.target.copy(target)
-    camera.position.set(12, 12, 18)
-    camera.lookAt(target)
+    terrenoMesh.visible = true
+    baseTerreno.visible = true
+    configuracionAplicada = datos
   }
-
-  const limpiarTerreno = () => {
-    terrainGroup.clear()
-    controls.target.set(0, 2, 0)
-    camera.position.set(12, 12, 18)
-    camera.lookAt(0, 1, 0)
-  }
-
-  actualizarTerreno(configuracionInicial)
 
   const resize = () => {
     if (!contendor) return
