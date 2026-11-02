@@ -34,6 +34,7 @@ const calibracion = ref({
   escala: 1,
   rotacion: 0,
   mostrarCuadricula: false,
+  mostrarMalla: false,
 })
 let intervaloActualizacion = null
 let consultaEnCurso = false
@@ -159,6 +160,7 @@ function restablecerCalibracion() {
     escala: 1,
     rotacion: 0,
     mostrarCuadricula: false,
+    mostrarMalla: false,
   }
 }
 
@@ -338,11 +340,11 @@ watch(
 
 onMounted(() => {
   iniciarCanalProyector()
+  document.addEventListener('fullscreenchange', sincronizarPantallaCompleta)
+  document.addEventListener('keydown', manejarTecla)
 
   if (esVentanaProyeccion) return
 
-  document.addEventListener('fullscreenchange', sincronizarPantallaCompleta)
-  document.addEventListener('keydown', manejarTecla)
   consultarBackend()
   intervaloActualizacion = window.setInterval(() => consultarBackend({ silenciosa: true }), 2000)
 })
@@ -382,21 +384,35 @@ onUnmounted(() => {
     }"
   >
     <header v-if="!esVentanaProyeccion" class="topbar">
-      <div>
-        <p class="eyebrow">AR Sandbox</p>
-        <h1>Visualización 3D</h1>
+      <div class="brand-lockup">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M3 17.5 8.1 12l3.4 3 4.3-5 5.2 7.5H3Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+            <path d="M4 20h16M7 8.5l2.1-2.2L12 9l2.6-3 5.4 6.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </span>
+        <div>
+          <p class="eyebrow">AR Sandbox</p>
+          <h1>Panel de control</h1>
+          <p class="header-caption">Terreno, cámara y proyección en un solo lugar.</p>
+        </div>
       </div>
       <div class="topbar-actions">
         <button
-          class="projector-button"
+          class="projector-button primary"
           type="button"
           :disabled="!canalDisponible"
           @click="proyeccionActiva ? cerrarVentanaProyeccion() : abrirVentanaProyeccion()"
         >
+          <span aria-hidden="true">{{ proyeccionActiva ? '▣' : '↗' }}</span>
           {{ proyeccionActiva ? 'Cerrar ventana de proyección' : 'Abrir ventana de proyección' }}
         </button>
-        <button class="projector-button" @click="activarModoProyector">Modo proyector</button>
-        <button class="refresh-button" @click="consultarBackend" :disabled="cargando">
+        <button class="projector-button" type="button" @click="activarModoProyector">
+          <span aria-hidden="true">⛶</span>
+          Modo proyector
+        </button>
+        <button class="refresh-button" type="button" @click="consultarBackend" :disabled="cargando">
+          <span aria-hidden="true">↻</span>
           {{ cargando ? 'Consultando...' : 'Actualizar' }}
         </button>
       </div>
@@ -416,8 +432,17 @@ onUnmounted(() => {
       {{ pantallaCompleta ? 'Salir de pantalla completa' : 'Volver al modo control' }}
     </button>
 
+    <button
+      v-if="esVentanaProyeccion && !pantallaCompleta"
+      class="projector-enter-button"
+      type="button"
+      @click="activarModoProyector"
+    >
+      <span aria-hidden="true">⛶</span> Pantalla completa
+    </button>
+
     <main class="layout-grid" :class="{ 'projection-layout': esVentanaProyeccion }">
-      <section class="viewer-zone">
+      <section class="viewer-zone" aria-label="Vista previa del terreno">
         <VisorTerreno
           :terreno="configuracion?.terreno || 'montanas'"
           :color="configuracion?.color || 'Verde bosque'"

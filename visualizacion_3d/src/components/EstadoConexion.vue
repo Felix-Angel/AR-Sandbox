@@ -21,17 +21,23 @@ const props = defineProps({
 
 <template>
   <div class="status-panel">
-    <div class="panel-title">Estado de conexión</div>
+    <div class="panel-heading">
+      <span class="panel-icon" aria-hidden="true">⌁</span>
+      <div>
+        <div class="panel-title">Estado de conexión</div>
+        <div class="panel-subtitle">Seguimiento del servicio FastAPI</div>
+      </div>
+    </div>
     <div class="status-row">
-      <span class="status-label">Backend</span>
-      <span :class="['badge', props.conectado ? 'success' : 'danger']">
+      <span class="status-label">Servidor</span>
+      <span :class="['badge', props.conectado ? 'success' : 'danger']" aria-live="polite">
         {{ props.conectado ? 'Conectado' : 'Desconectado' }}
       </span>
     </div>
     <div class="status-row">
-      <span class="status-label">Carga</span>
+      <span class="status-label">Consulta</span>
       <span :class="['badge', props.cargando ? 'warning' : 'neutral']">
-        {{ props.cargando ? 'Consultando...' : 'Listo' }}
+        {{ props.cargando ? 'Consultando...' : 'En espera' }}
       </span>
     </div>
     <div class="status-row">

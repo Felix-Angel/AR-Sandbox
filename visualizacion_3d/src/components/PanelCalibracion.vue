@@ -24,9 +24,12 @@ function actualizarNumero(campo, evento) {
 <template>
   <section class="calibration-panel">
     <div class="panel-header">
-      <div>
-        <div class="panel-title">Calibración del proyector</div>
-        <div class="panel-subtitle">Ajusta el terreno a la superficie de proyección.</div>
+      <div class="panel-heading">
+        <span class="panel-icon" aria-hidden="true">⌗</span>
+        <div>
+          <div class="panel-title">Calibración</div>
+          <div class="panel-subtitle">Ajusta el relieve a la superficie de proyección.</div>
+        </div>
       </div>
     </div>
 
@@ -72,7 +75,7 @@ function actualizarNumero(campo, evento) {
     </div>
 
     <label class="calibration-field">
-      <span>Desplazamiento horizontal: {{ props.modelValue.desplazamientoX }}</span>
+      <span>Desplazamiento horizontal <strong>{{ props.modelValue.desplazamientoX.toFixed(1) }}</strong></span>
       <input
         type="range"
         min="-10"
@@ -84,7 +87,7 @@ function actualizarNumero(campo, evento) {
     </label>
 
     <label class="calibration-field">
-      <span>Desplazamiento vertical: {{ props.modelValue.desplazamientoY }}</span>
+      <span>Desplazamiento vertical <strong>{{ props.modelValue.desplazamientoY.toFixed(1) }}</strong></span>
       <input
         type="range"
         min="-10"
@@ -96,7 +99,7 @@ function actualizarNumero(campo, evento) {
     </label>
 
     <label class="calibration-field">
-      <span>Escala / zoom: {{ props.modelValue.escala.toFixed(2) }}×</span>
+      <span>Escala <strong>{{ props.modelValue.escala.toFixed(2) }}×</strong></span>
       <input
         type="range"
         min="0.1"
@@ -108,7 +111,7 @@ function actualizarNumero(campo, evento) {
     </label>
 
     <label class="calibration-field">
-      <span>Rotación: {{ props.modelValue.rotacion }}°</span>
+      <span>Rotación <strong>{{ props.modelValue.rotacion }}°</strong></span>
       <input
         type="range"
         min="-180"
@@ -128,8 +131,17 @@ function actualizarNumero(campo, evento) {
       <span>Mostrar cuadrícula de calibración</span>
     </label>
 
+    <label class="calibration-checkbox">
+      <input
+        type="checkbox"
+        :checked="props.modelValue.mostrarMalla"
+        @change="actualizar('mostrarMalla', $event.target.checked)"
+      />
+      <span>Mostrar malla sobre el relieve</span>
+    </label>
+
     <button class="calibration-reset-button" type="button" @click="emit('restablecer')">
-      Restablecer valores
+      <span aria-hidden="true">↺</span> Restablecer calibración
     </button>
   </section>
 </template>

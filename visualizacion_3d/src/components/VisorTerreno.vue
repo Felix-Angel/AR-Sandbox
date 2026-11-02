@@ -67,6 +67,8 @@ const actualizarVisualizacion = () => {
   })
 }
 
+const restablecerCamara = () => escena?.restablecerCamara()
+
 onMounted(() => {
   if (contenedor.value) {
     escena = crearEscena(contenedor.value, {
@@ -123,12 +125,21 @@ onBeforeUnmount(() => {
 <template>
   <div class="viewer-panel">
     <div class="viewer-header">
-      <span>Visor 3D</span>
-      <span :class="['badge', props.estado === 'en_ejecucion' ? 'success' : 'neutral']">
-        {{ props.estado || 'sin_configurar' }}
+      <div class="viewer-title-group">
+        <span class="viewer-icon" aria-hidden="true">◈</span>
+        <div>
+          <div class="viewer-title">Vista del terreno</div>
+          <div class="viewer-hint">Arrastra para orbitar · usa la rueda para acercar</div>
+        </div>
+      </div>
+      <span :class="['badge', props.estado === 'en_ejecucion' ? 'success' : 'neutral']" aria-live="polite">
+        {{ props.estado === 'en_ejecucion' ? 'En ejecución' : props.estado || 'Sin configurar' }}
       </span>
+      <button class="viewer-action" type="button" @click="restablecerCamara" aria-label="Restablecer encuadre de cámara">
+        <span aria-hidden="true">↺</span> Centrar cámara
+      </button>
     </div>
-    <div ref="contenedor" class="viewer-canvas" aria-label="Terreno 3D" />
+    <div ref="contenedor" class="viewer-canvas" role="img" aria-label="Vista interactiva del terreno en tres dimensiones" />
     <div v-if="!props.configurado" class="viewer-empty-message">
       Actualmente no hay una configuración guardada.
     </div>

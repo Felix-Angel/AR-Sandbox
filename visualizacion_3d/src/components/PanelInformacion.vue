@@ -28,11 +28,15 @@ const emit = defineEmits(['actualizar'])
 <template>
   <aside class="info-panel">
     <div class="panel-header">
-      <div>
-        <div class="panel-title">Información del terreno</div>
-        <div class="panel-subtitle">Datos actuales en FastAPI</div>
+      <div class="panel-heading">
+        <span class="panel-icon" aria-hidden="true">⌁</span>
+        <div>
+          <div class="panel-title">Controles del terreno</div>
+          <div class="panel-subtitle">Configuración recibida desde FastAPI</div>
+        </div>
       </div>
-      <button class="update-button" @click="emit('actualizar')" :disabled="props.cargando">
+      <button class="update-button" type="button" @click="emit('actualizar')" :disabled="props.cargando">
+        <span aria-hidden="true">↻</span>
         {{ props.cargando ? 'Actualizando...' : 'Actualizar datos' }}
       </button>
     </div>
@@ -48,7 +52,7 @@ const emit = defineEmits(['actualizar'])
       </div>
       <div class="metric-card">
         <span class="label">Altura</span>
-        <strong>{{ props.configuracion.altura }}</strong>
+        <strong>{{ props.configuracion.altura }}%</strong>
       </div>
       <div class="metric-card">
         <span class="label">Estado</span>
@@ -57,8 +61,8 @@ const emit = defineEmits(['actualizar'])
     </div>
 
     <div v-else class="empty-state">
-      <p>Todavía no existe una configuración.</p>
-      <p>Consulta el backend para registrar un terreno.</p>
+      <p>Todavía no hay un terreno configurado.</p>
+      <p>Selecciona y guarda un terreno desde la aplicación Flutter.</p>
     </div>
 
     <div v-if="props.error" class="error-box">
@@ -67,7 +71,7 @@ const emit = defineEmits(['actualizar'])
 
     <div class="connection-summary">
       <span class="mini-label">Conexión</span>
-      <span :class="['badge', props.conectado ? 'success' : 'danger']">
+      <span :class="['badge', props.conectado ? 'success' : 'danger']" aria-live="polite">
         {{ props.conectado ? 'Conectado' : 'Sin conexión' }}
       </span>
     </div>

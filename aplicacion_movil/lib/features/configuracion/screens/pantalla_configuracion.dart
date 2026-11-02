@@ -18,7 +18,7 @@ class ConfiguracionTerreno {
   final String? nombreColorApi;
 
   factory ConfiguracionTerreno.desdeApi(ConfiguracionSimulacion config) {
-    final color = _coloresApi[config.color];
+    final color = coloresDisponibles[config.color];
     if (color == null) {
       throw FormatException('Color recibido no reconocido: ${config.color}');
     }
@@ -29,7 +29,7 @@ class ConfiguracionTerreno {
     );
   }
 
-  static const Map<String, Color> _coloresApi = {
+  static const Map<String, Color> coloresDisponibles = {
     'Verde bosque': AppTheme.verde,
     'Terracota': AppTheme.terracota,
     'Crema': AppTheme.crema,
@@ -37,17 +37,15 @@ class ConfiguracionTerreno {
     'Maíz': AppTheme.maiz,
     'Turquesa': AppTheme.turquesa,
     'Bugambilia': AppTheme.bugambilia,
-    'Café': Colors.brown,
-    'Gris': Colors.grey,
+    'Café': AppTheme.cafe,
+    'Gris': AppTheme.gris,
   };
 
   String get nombreColor {
     if (nombreColorApi != null) return nombreColorApi!;
-    if (color == AppTheme.verde) return 'Verde bosque';
-    if (color == Colors.brown) return 'Café';
-    if (color == AppTheme.terracota) return 'Terracota';
-    if (color == Colors.grey) return 'Gris';
-    if (color == AppTheme.turquesa) return 'Turquesa';
+    for (final entrada in coloresDisponibles.entries) {
+      if (entrada.value == color) return entrada.key;
+    }
     return 'Personalizado';
   }
 }
@@ -79,13 +77,7 @@ class _PantallaConfiguracionState extends State<PantallaConfiguracion> {
   bool _enviando = false;
   RespuestaSimulacion? _respuestaRegistro;
 
-  static const _colores = <Color>[
-    AppTheme.verde,
-    Colors.brown,
-    AppTheme.terracota,
-    Colors.grey,
-    AppTheme.turquesa,
-  ];
+  static const _colores = ConfiguracionTerreno.coloresDisponibles;
 
   void _actualizar({Color? color, double? altura}) {
     if (_enviando) return;
@@ -188,14 +180,12 @@ class _PantallaConfiguracionState extends State<PantallaConfiguracion> {
         ),
         const SizedBox(height: 14),
         Wrap(
-          spacing: 14,
-          runSpacing: 12,
-          children: _colores.map((color) {
+          spacing: 10,
+          runSpacing: 10,
+          children: _colores.entries.map((entrada) {
+            final nombre = entrada.key;
+            final color = entrada.value;
             final seleccionado = color == config.color;
-            final nombre = ConfiguracionTerreno(
-              color: color,
-              altura: config.altura,
-            ).nombreColor;
             return Semantics(
               button: true,
               selected: seleccionado,
@@ -203,30 +193,39 @@ class _PantallaConfiguracionState extends State<PantallaConfiguracion> {
               child: Tooltip(
                 message: nombre,
                 child: InkWell(
-                  customBorder: const CircleBorder(),
+                  customBorder: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(18),
+                  ),
                   onTap: controlesDeshabilitados
                       ? null
                       : () => _actualizar(color: color),
-                  child: Container(
-                    width: 52,
-                    height: 52,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 160),
+                    width: 58,
+                    height: 58,
                     decoration: BoxDecoration(
                       color: color,
-                      shape: BoxShape.circle,
+                      borderRadius: BorderRadius.circular(18),
                       border: Border.all(
-                        color: seleccionado ? AppTheme.tinta : Colors.white,
+                        color: seleccionado ? AppTheme.verde : AppTheme.borde,
                         width: seleccionado ? 3 : 1,
                       ),
                       boxShadow: [
                         if (seleccionado)
                           BoxShadow(
-                            color: color.withValues(alpha: .35),
-                            blurRadius: 9,
+                            color: AppTheme.verde.withValues(alpha: .17),
+                            blurRadius: 12,
+                            offset: const Offset(0, 4),
                           ),
                       ],
                     ),
                     child: seleccionado
-                        ? const Icon(Icons.check_rounded, color: Colors.white)
+                        ? Icon(
+                            Icons.check_rounded,
+                            color: color.computeLuminance() < .35
+                                ? Colors.white
+                                : AppTheme.tinta,
+                          )
                         : null,
                   ),
                 ),
