@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../../core/network/backend_api_service.dart';
+import '../../../core/network/backend_config.dart';
 import '../../../core/network/models/configuracion_simulacion.dart'
     show ConfiguracionSimulacion, SolicitudConfiguracion, TerrenosApi;
 import '../../../core/network/models/respuesta_simulacion.dart' as api_models;
@@ -402,7 +403,7 @@ class _Inicio extends StatelessWidget {
               icono: Icons.terrain_rounded,
               titulo: 'Terrenos',
               detalle: 'Elige un paisaje',
-              color: AppTheme.turquesa,
+              color: AppTheme.verde,
               onTap: () => irA(1),
             ),
           ),
@@ -412,7 +413,7 @@ class _Inicio extends StatelessWidget {
               icono: Icons.tune_rounded,
               titulo: 'Configurar',
               detalle: terreno == null ? 'Primero elige' : 'Color y altura',
-              color: AppTheme.bugambilia,
+              color: AppTheme.terracota,
               onTap: () => irA(terreno == null ? 1 : 2),
             ),
           ),
@@ -660,8 +661,8 @@ class _Terrenos extends StatelessWidget {
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(20),
                     side: BorderSide(
-                      color: activo ? AppTheme.verde : Colors.transparent,
-                      width: 2,
+                      color: activo ? AppTheme.verde : AppTheme.borde,
+                      width: activo ? 2 : 1,
                     ),
                   ),
                   child: InkWell(
@@ -791,11 +792,21 @@ class _Ajustes extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ListView(
-    padding: const EdgeInsets.all(20),
-    children: const [
+    padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+    children: [
       Text(
         'Ajustes',
-        style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+          color: AppTheme.tinta,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+      const SizedBox(height: 6),
+      Text(
+        'Información de la aplicación y conexión.',
+        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+          color: AppTheme.tinta.withValues(alpha: .72),
+        ),
       ),
       SizedBox(height: 16),
       Card(
@@ -808,14 +819,23 @@ class _Ajustes extends StatelessWidget {
           subtitle: Text('Explora y configura terrenos interactivos.'),
         ),
       ),
+      const SizedBox(height: 12),
       Card(
         child: ListTile(
-          leading: Icon(Icons.cloud_off, color: AppTheme.terracota),
-          title: Text('Servidor'),
-          subtitle: Text('Conexión todavía no configurada'),
-          trailing: Icon(Icons.circle, size: 10, color: AppTheme.terracota),
+          leading: const Icon(Icons.dns_outlined, color: AppTheme.verde),
+          title: const Text('Dirección de FastAPI'),
+          subtitle: Text(BackendConfig.baseUrl),
+          trailing: const Icon(Icons.lan_outlined, color: AppTheme.turquesa),
         ),
       ),
+      const Padding(
+        padding: EdgeInsets.fromLTRB(16, 8, 16, 16),
+        child: Text(
+          'En el emulador Android, 10.0.2.2 apunta a tu computadora. Para un dispositivo físico se necesita la IP local del equipo.',
+          style: TextStyle(color: AppTheme.tinta, height: 1.4),
+        ),
+      ),
+      const SizedBox(height: 4),
       Card(
         child: ListTile(
           leading: Icon(Icons.info_outline, color: AppTheme.turquesa),

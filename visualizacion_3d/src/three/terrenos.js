@@ -1,16 +1,18 @@
 import * as THREE from 'three'
 
 const PALETA_COLORES = {
-  'Verde bosque': '#2e7d32',
-  Terracota: '#c9653b',
-  Crema: '#f3d9a3',
-  Tinta: '#2d3748',
-  'Maíz': '#f4c95d',
-  Turquesa: '#2aa4a4',
-  Bugambilia: '#8e5ea2',
+  'Verde bosque': '#315c45',
+  Terracota: '#c66a4a',
+  Crema: '#faf7f0',
+  Tinta: '#26352d',
+  'Maíz': '#e5b94b',
+  Turquesa: '#3e9b98',
+  Bugambilia: '#b64d73',
   Café: '#7a4a2f',
   Gris: '#7d8797',
 }
+
+let texturaTerrenoCompartida = null
 
 function normalizarAltura(altura) {
   const valor = Number.isFinite(altura) ? altura : 50
@@ -25,29 +27,74 @@ function ruidoBase(x, z) {
   return Math.sin(x * 1.7 + z * 0.9) * 0.6 + Math.cos(z * 1.2 - x * 0.7) * 0.5
 }
 
+function crearTexturaTerreno() {
+  if (texturaTerrenoCompartida) return texturaTerrenoCompartida
+
+  const canvas = document.createElement('canvas')
+  canvas.width = 128
+  canvas.height = 128
+  const contexto = canvas.getContext('2d', { willReadFrequently: true })
+  const imagen = contexto.createImageData(canvas.width, canvas.height)
+
+  for (let y = 0; y < canvas.height; y += 1) {
+    for (let x = 0; x < canvas.width; x += 1) {
+      const indice = (y * canvas.width + x) * 4
+      const grano = Math.sin(x * 0.41 + Math.cos(y * 0.27)) * 8
+        + Math.cos(y * 0.36 - Math.sin(x * 0.19)) * 7
+      const variacion = (Math.imul(x + 1, 374761393) + Math.imul(y + 1, 668265263)) >>> 0
+      const moteado = (variacion % 19) - 9
+      const valor = Math.min(255, Math.max(0, 218 + grano + moteado))
+      imagen.data[indice] = valor
+      imagen.data[indice + 1] = valor
+      imagen.data[indice + 2] = valor
+      imagen.data[indice + 3] = 255
+    }
+  }
+
+  contexto.putImageData(imagen, 0, 0)
+  texturaTerrenoCompartida = new THREE.CanvasTexture(canvas)
+  texturaTerrenoCompartida.colorSpace = THREE.SRGBColorSpace
+  texturaTerrenoCompartida.wrapS = THREE.RepeatWrapping
+  texturaTerrenoCompartida.wrapT = THREE.RepeatWrapping
+  texturaTerrenoCompartida.repeat.set(3, 3)
+  texturaTerrenoCompartida.anisotropy = 4
+  texturaTerrenoCompartida.needsUpdate = true
+  return texturaTerrenoCompartida
+}
+
+function campana(x, z, centroX, centroZ, radioX, radioZ = radioX) {
+  return Math.exp(-(((x - centroX) ** 2) / radioX + ((z - centroZ) ** 2) / radioZ))
+}
+
 function calcularAlturaTerreno({ terreno, altura, x, z }) {
   const nivel = normalizarAltura(altura) / 100
   const radio = Math.sqrt(x * x + z * z)
 
   switch (terreno) {
     case 'montanas': {
-      const ondulacion = Math.sin(x * 2.4) + Math.cos(z * 2.8) + Math.sin((x + z) * 1.9)
-      return (0.8 + ondulacion * 0.8) * (1.8 + nivel * 6)
+      const picos = campana(x, z, -3.2, -2.1, 8.5)
+        + campana(x, z, 1.7, 2.6, 6.5) * 0.82
+        + campana(x, z, 4.3, -3.6, 5.2) * 0.58
+        + campana(x, z, -0.2, 5.2, 7.2) * 0.66
+      const rugosidad = ruidoBase(x, z) * 0.12
+      return Math.max(0.12, 0.18 + picos * (2.4 + nivel * 8.2) + rugosidad)
     }
     case 'valles': {
-      const depresion = Math.cos(x * 1.4) * Math.sin(z * 1.7)
-      const laterales = Math.exp(-((x * x) / 18 + (z * z) / 18))
-      return (0.7 + depresion * 0.8 + laterales * 1.8) * (1.2 + nivel * 4.2) - (1.4 + nivel * 1.6)
+      const ladera = 1 - Math.exp(-((x * x) / 18))
+      const ondulacion = Math.sin(z * 0.78 + x * 0.3) * 0.16 + ruidoBase(x, z) * 0.08
+      return Math.max(0.05, (0.16 + ladera * 0.8 + ondulacion) * (1.2 + nivel * 5.4))
     }
     case 'volcanes': {
-      const conica = 1 - Math.min(1, radio / 8)
-      const crater = Math.exp(-((x * x + z * z) / 2.2))
-      return (0.9 + conica * 4.2 + crater * 1.1) * (0.8 + nivel * 4.5) - 1.5
+      const conica = Math.max(0, 1 - radio / 8.4) ** 1.35
+      const crater = Math.exp(-((radio * radio) / 1.25))
+      const bordeCrater = Math.exp(-(((radio - 1.45) ** 2) / 0.32))
+      const escala = 1.4 + nivel * 6.4
+      return Math.max(0.08, 0.18 + conica * escala - crater * escala * 0.48 + bordeCrater * escala * 0.12)
     }
     case 'llanuras':
     default: {
-      const leve = Math.sin(x * 2.5) * 0.7 + Math.cos(z * 2.1) * 0.6 + ruidoBase(x, z)
-      return (0.25 + leve * 0.35) * (1 + nivel * 2.2)
+      const leve = Math.sin(x * 0.85) * 0.16 + Math.cos(z * 0.72) * 0.14 + ruidoBase(x, z) * 0.08
+      return Math.max(0.08, (0.28 + leve) * (1 + nivel * 2.6))
     }
   }
 }
@@ -55,7 +102,7 @@ function calcularAlturaTerreno({ terreno, altura, x, z }) {
 export function crearGeometriaTerreno({ terreno = 'montanas', altura = 50 }) {
   const ancho = 16
   const profundidad = 16
-  const segmentos = 80
+  const segmentos = 100
 
   const geometria = new THREE.PlaneGeometry(ancho, profundidad, segmentos, segmentos)
   geometria.rotateX(-Math.PI / 2)
@@ -80,8 +127,9 @@ export function crearTerreno({ terreno = 'montanas', color = 'Verde bosque', alt
 
   const material = new THREE.MeshStandardMaterial({
     color: obtenerColorTerreno(color),
-    roughness: 0.9,
-    metalness: 0.08,
+    map: crearTexturaTerreno(),
+    roughness: 0.96,
+    metalness: 0.01,
   })
 
   const terrenoMesh = new THREE.Mesh(geometria, material)
@@ -91,7 +139,7 @@ export function crearTerreno({ terreno = 'montanas', color = 'Verde bosque', alt
   const base = new THREE.Mesh(
     new THREE.CylinderGeometry(9.5, 10.8, 2.8, 32),
     new THREE.MeshStandardMaterial({
-      color: '#1d2a39',
+      color: '#26352d',
       roughness: 0.9,
       metalness: 0.15,
     }),

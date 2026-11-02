@@ -5,8 +5,8 @@ import { crearGeometriaTerreno, crearTerreno, obtenerColorTerreno } from './terr
 
 export function crearEscena(contendor, configuracionInicial = {}) {
   const scene = new THREE.Scene()
-  scene.background = new THREE.Color('#0b1220')
-  scene.fog = new THREE.Fog('#0b1220', 18, 60)
+  scene.background = new THREE.Color('#07140f')
+  scene.fog = new THREE.Fog('#07140f', 34, 92)
 
   const anchoInicial = contendor.clientWidth || 1
   const altoInicial = contendor.clientHeight || 1
@@ -15,28 +15,41 @@ export function crearEscena(contendor, configuracionInicial = {}) {
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
   renderer.setSize(anchoInicial, altoInicial)
+  renderer.outputColorSpace = THREE.SRGBColorSpace
+  renderer.toneMapping = THREE.ACESFilmicToneMapping
+  renderer.toneMappingExposure = 1.12
   renderer.shadowMap.enabled = true
   renderer.shadowMap.type = THREE.PCFSoftShadowMap
   renderer.shadowMap.autoUpdate = false
   renderer.shadowMap.needsUpdate = true
   contendor.appendChild(renderer.domElement)
 
-  const hemiLight = new THREE.HemisphereLight('#dfe9ff', '#1a2433', 1.25)
+  const hemiLight = new THREE.HemisphereLight('#f5f0df', '#26392c', 1.45)
   scene.add(hemiLight)
 
-  const dirLight = new THREE.DirectionalLight('#ffffff', 1.4)
-  dirLight.position.set(10, 18, 10)
+  const dirLight = new THREE.DirectionalLight('#fff3d8', 3.1)
+  dirLight.position.set(-9, 19, 11)
   dirLight.castShadow = true
   dirLight.shadow.mapSize.width = 2048
   dirLight.shadow.mapSize.height = 2048
+  dirLight.shadow.camera.left = -16
+  dirLight.shadow.camera.right = 16
+  dirLight.shadow.camera.top = 18
+  dirLight.shadow.camera.bottom = -14
+  dirLight.shadow.bias = -0.00018
+  dirLight.shadow.normalBias = 0.025
   scene.add(dirLight)
+
+  const fillLight = new THREE.DirectionalLight('#9bc9b0', 1.05)
+  fillLight.position.set(12, 8, -10)
+  scene.add(fillLight)
 
   const suelo = new THREE.Mesh(
     new THREE.CircleGeometry(18, 80),
     new THREE.MeshStandardMaterial({
-      color: '#101a2d',
+      color: '#17251b',
       roughness: 1,
-      metalness: 0,
+      metalness: 0.02,
     }),
   )
   suelo.rotation.x = -Math.PI / 2
@@ -46,9 +59,13 @@ export function crearEscena(contendor, configuracionInicial = {}) {
 
   const controls = new OrbitControls(camera, renderer.domElement)
   controls.enableDamping = true
+  controls.dampingFactor = 0.075
   controls.enablePan = false
-  controls.minDistance = 8
-  controls.maxDistance = 34
+  controls.rotateSpeed = 0.72
+  controls.zoomSpeed = 0.82
+  controls.minDistance = 7
+  controls.maxDistance = 48
+  controls.minPolarAngle = 0.12
   controls.maxPolarAngle = Math.PI * 0.48
   controls.target.set(0, 2, 0)
 
@@ -100,7 +117,7 @@ export function crearEscena(contendor, configuracionInicial = {}) {
   surfaceGroup.add(calibrationGroup)
   calibrationGroup.add(terrainGroup)
 
-  const gridHelper = new THREE.GridHelper(21.6, 16, '#7dd3fc', '#38bdf8')
+  const gridHelper = new THREE.GridHelper(21.6, 18, '#c66a4a', '#9db58c')
   gridHelper.visible = false
   gridHelper.position.y = 0.02
   gridHelper.castShadow = false
@@ -108,11 +125,30 @@ export function crearEscena(contendor, configuracionInicial = {}) {
   const gridMaterials = Array.isArray(gridHelper.material) ? gridHelper.material : [gridHelper.material]
   gridMaterials.forEach((material) => {
     material.transparent = true
-    material.opacity = 0.72
+    material.opacity = 0.58
     material.depthTest = false
+    material.toneMapped = false
   })
   gridHelper.renderOrder = 2
   calibrationGroup.add(gridHelper)
+
+  const materialMalla = new THREE.MeshBasicMaterial({
+    color: '#e8ead6',
+    transparent: true,
+    opacity: 0.24,
+    wireframe: true,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
+    toneMapped: false,
+  })
+  materialMalla.side = THREE.DoubleSide
+  const mallaTerreno = new THREE.Mesh(new THREE.BufferGeometry(), materialMalla)
+  mallaTerreno.visible = false
+  mallaTerreno.renderOrder = 1
+  mallaTerreno.position.y = 0.012
+  terrainGroup.add(mallaTerreno)
   let calibracionAplicada = null
 
   const actualizarCalibracion = (calibracion = {}) => {
@@ -134,6 +170,7 @@ export function crearEscena(contendor, configuracionInicial = {}) {
       escala,
       rotacion,
       mostrarCuadricula: Boolean(calibracion.mostrarCuadricula),
+      mostrarMalla: Boolean(calibracion.mostrarMalla),
     }
     const cambioTransformacion = !calibracionAplicada
       || nuevaCalibracion.superficie !== calibracionAplicada.superficie
@@ -146,6 +183,7 @@ export function crearEscena(contendor, configuracionInicial = {}) {
       || nuevaCalibracion.rotacion !== calibracionAplicada.rotacion
     const cambioCuadricula = !calibracionAplicada
       || nuevaCalibracion.mostrarCuadricula !== calibracionAplicada.mostrarCuadricula
+      || nuevaCalibracion.mostrarMalla !== calibracionAplicada.mostrarMalla
 
     if (!cambioTransformacion && !cambioCuadricula) return
 
@@ -154,6 +192,7 @@ export function crearEscena(contendor, configuracionInicial = {}) {
     calibrationGroup.rotation.y = THREE.MathUtils.degToRad(rotacion)
     calibrationGroup.scale.set((ancho / 21.6) * escala, escala, (alto / 21.6) * escala)
     gridHelper.visible = nuevaCalibracion.mostrarCuadricula
+    mallaTerreno.visible = nuevaCalibracion.mostrarMalla && Boolean(terrenoMesh?.geometry)
 
     if (cambioTransformacion) {
       renderer.shadowMap.needsUpdate = true
@@ -184,7 +223,51 @@ export function crearEscena(contendor, configuracionInicial = {}) {
   const grupoTerreno = crearTerreno(datosTerreno)
   const terrenoMesh = grupoTerreno.children[0]
   const baseTerreno = grupoTerreno.children[1]
+  const targetCamara = new THREE.Vector3(0, 2, 0)
   terrainGroup.add(grupoTerreno)
+
+  const calcularDistanciaEncuadre = () => {
+    if (!terrenoMesh.visible || !terrenoMesh.geometry) return 24
+    const limites = new THREE.Box3().setFromObject(grupoTerreno)
+    const esfera = limites.getBoundingSphere(new THREE.Sphere())
+    const fovVertical = THREE.MathUtils.degToRad(camera.fov)
+    const fovHorizontal = 2 * Math.atan(Math.tan(fovVertical / 2) * camera.aspect)
+    const fovLimitante = Math.min(fovVertical, fovHorizontal)
+    const distancia = Math.max(12, (esfera.radius / Math.sin(fovLimitante / 2)) * 1.08)
+    controls.maxDistance = Math.max(48, distancia * 1.2)
+    return distancia
+  }
+
+  const encuadrarTerreno = (restablecer = false) => {
+    if (terrenoMesh.visible && terrenoMesh.geometry) {
+      const limites = new THREE.Box3().setFromObject(grupoTerreno)
+      const centro = limites.getCenter(new THREE.Vector3())
+      const tamano = limites.getSize(new THREE.Vector3())
+      targetCamara.set(centro.x, centro.y + tamano.y * 0.25, centro.z)
+    } else {
+      targetCamara.set(0, 2, 0)
+    }
+
+    let direccion = camera.position.clone().sub(controls.target)
+    if (restablecer || direccion.lengthSq() < 0.001) {
+      direccion.set(12, 10, 18)
+    }
+    direccion.normalize()
+
+    const distanciaActual = camera.position.distanceTo(controls.target)
+    const distanciaNecesaria = calcularDistanciaEncuadre()
+    const distanciaFinal = restablecer
+      ? distanciaNecesaria
+      : Math.max(distanciaActual, distanciaNecesaria)
+
+    controls.target.copy(targetCamara)
+    camera.position.copy(targetCamara).addScaledVector(direccion, distanciaFinal)
+    camera.zoom = 1
+    camera.lookAt(targetCamara)
+    camera.updateProjectionMatrix()
+    controls.update()
+    solicitarRender()
+  }
 
   if (!datosIniciales) {
     terrenoMesh.geometry.dispose()
@@ -192,15 +275,9 @@ export function crearEscena(contendor, configuracionInicial = {}) {
     terrenoMesh.visible = false
     baseTerreno.visible = false
   } else {
-    const bounds = new THREE.Box3().setFromObject(grupoTerreno)
-    const center = bounds.getCenter(new THREE.Vector3())
-    const size = bounds.getSize(new THREE.Vector3())
-    const targetInicial = new THREE.Vector3(center.x, center.y + size.y * 0.25, center.z)
-
-    controls.target.copy(targetInicial)
-    camera.position.set(12, 12, 18)
-    camera.lookAt(targetInicial)
-    controls.update()
+    mallaTerreno.geometry.dispose()
+    mallaTerreno.geometry = terrenoMesh.geometry
+    encuadrarTerreno(true)
   }
 
   let configuracionAplicada = datosIniciales ? datosTerreno : null
@@ -217,6 +294,7 @@ export function crearEscena(contendor, configuracionInicial = {}) {
 
     terrenoMesh.visible = false
     baseTerreno.visible = false
+    mallaTerreno.visible = false
     configuracionAplicada = null
 
     if (cambioVisibilidad || habiaGeometria) {
@@ -233,6 +311,7 @@ export function crearEscena(contendor, configuracionInicial = {}) {
       return
     }
 
+    const estabaVisible = terrenoMesh.visible
     const cambioGeometria = !terrenoMesh.geometry || !configuracionAplicada
       || datos.terreno !== configuracionAplicada.terreno
       || datos.altura !== configuracionAplicada.altura
@@ -244,6 +323,10 @@ export function crearEscena(contendor, configuracionInicial = {}) {
     if (cambioGeometria) {
       const geometriaAnterior = terrenoMesh.geometry
       terrenoMesh.geometry = crearGeometriaTerreno(datos)
+      if (mallaTerreno.geometry !== geometriaAnterior) {
+        mallaTerreno.geometry.dispose()
+      }
+      mallaTerreno.geometry = terrenoMesh.geometry
       geometriaAnterior?.dispose()
     }
 
@@ -253,7 +336,12 @@ export function crearEscena(contendor, configuracionInicial = {}) {
 
     terrenoMesh.visible = true
     baseTerreno.visible = true
+    mallaTerreno.visible = Boolean(calibracionAplicada?.mostrarMalla)
     configuracionAplicada = datos
+
+    if (!estabaVisible) {
+      encuadrarTerreno(true)
+    }
 
     if (cambioGeometria || cambioVisibilidad) {
       renderer.shadowMap.needsUpdate = true
@@ -276,6 +364,7 @@ export function crearEscena(contendor, configuracionInicial = {}) {
     camera.aspect = ancho / alto
     camera.updateProjectionMatrix()
     renderer.setSize(ancho, alto)
+    encuadrarTerreno(false)
     solicitarRender()
   })
   resizeObserver.observe(contendor)
@@ -333,6 +422,10 @@ export function crearEscena(contendor, configuracionInicial = {}) {
     return true
   }
 
+  const restablecerCamara = () => {
+    encuadrarTerreno(true)
+  }
+
   solicitarRender()
 
   return {
@@ -344,6 +437,7 @@ export function crearEscena(contendor, configuracionInicial = {}) {
     actualizarCalibracion,
     obtenerEstadoCamara,
     aplicarEstadoCamara,
+    restablecerCamara,
     limpiarTerreno,
     dispose() {
       disposed = true
@@ -354,7 +448,12 @@ export function crearEscena(contendor, configuracionInicial = {}) {
       controls.removeEventListener('change', alCambiarControles)
       resizeObserver.disconnect()
       controls.dispose()
+      const geometriaMalla = mallaTerreno.geometry
       terrainGroup.clear()
+      if (geometriaMalla && geometriaMalla !== terrenoMesh.geometry) {
+        geometriaMalla.dispose()
+      }
+      materialMalla.dispose()
       gridHelper.geometry.dispose()
       if (Array.isArray(gridHelper.material)) {
         gridHelper.material.forEach((material) => material.dispose())
