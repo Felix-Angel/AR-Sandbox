@@ -96,3 +96,34 @@ class RespuestaConfiguracion {
     );
   }
 }
+
+/// Preset persistido que se puede seleccionar desde la aplicación móvil.
+class SimulacionGuardada {
+  const SimulacionGuardada({
+    required this.id,
+    required this.nombre,
+    required this.configuracion,
+  });
+
+  final int id;
+  final String nombre;
+  final ConfiguracionSimulacion configuracion;
+
+  factory SimulacionGuardada.fromJson(Map<String, dynamic> json) {
+    final id = json['id'];
+    final nombre = json['nombre'];
+    final configuracion = json['configuracion'];
+    if (id is! int || nombre is! String || configuracion is! Map) {
+      throw const FormatException(
+        'La simulación guardada tiene campos inválidos.',
+      );
+    }
+    return SimulacionGuardada(
+      id: id,
+      nombre: nombre,
+      configuracion: ConfiguracionSimulacion.fromJson(
+        Map<String, dynamic>.from(configuracion),
+      ),
+    );
+  }
+}

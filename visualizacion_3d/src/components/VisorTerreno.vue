@@ -69,6 +69,12 @@ const actualizarVisualizacion = () => {
 
 const restablecerCamara = () => escena?.restablecerCamara()
 
+const sincronizarInteraccionCamara = () => {
+  if (escena) {
+    escena.controls.enabled = props.estado !== 'detenida'
+  }
+}
+
 onMounted(() => {
   if (contenedor.value) {
     escena = crearEscena(contenedor.value, {
@@ -76,12 +82,18 @@ onMounted(() => {
       color: props.color,
       altura: props.altura,
     })
+    sincronizarInteraccionCamara()
     escena.actualizarCalibracion(props.calibracion)
     actualizarVisualizacion()
     escena.controls.addEventListener('change', emitirEstadoCamara)
     emit('camera-ready', escena.obtenerEstadoCamara())
   }
 })
+
+watch(
+  () => props.estado,
+  sincronizarInteraccionCamara,
+)
 
 watch(
   () => [props.terreno, props.color, props.altura, props.configurado],
@@ -135,7 +147,13 @@ onBeforeUnmount(() => {
       <span :class="['badge', props.estado === 'en_ejecucion' ? 'success' : 'neutral']" aria-live="polite">
         {{ props.estado === 'en_ejecucion' ? 'En ejecución' : props.estado || 'Sin configurar' }}
       </span>
-      <button class="viewer-action" type="button" @click="restablecerCamara" aria-label="Restablecer encuadre de cámara">
+      <button
+        class="viewer-action"
+        type="button"
+        :disabled="props.estado === 'detenida'"
+        @click="restablecerCamara"
+        aria-label="Restablecer encuadre de cámara"
+      >
         <span aria-hidden="true">↺</span> Centrar cámara
       </button>
     </div>

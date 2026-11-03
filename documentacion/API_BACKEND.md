@@ -2,7 +2,7 @@
 
 ## 1. Descripción general
 
-El backend expone una API HTTP para informar si el servicio está disponible y para registrar y consultar una configuración de terreno, además de controlar el estado básico de una simulación. La configuración y el estado se mantienen en memoria dentro del proceso del servidor.
+El backend expone una API HTTP para informar si el servicio está disponible, guardar varias simulaciones con nombre, seleccionar una y controlar su estado. La biblioteca se conserva en SQLite; el estado activo se mantiene en memoria.
 
 Esta etapa no genera geometría 3D ni se conecta con sensores, proyección física o un servicio externo. Los endpoints de simulación solo administran la configuración y el estado lógico.
 
@@ -23,6 +23,9 @@ Los endpoints de negocio implementados en `backend/main.py` son:
 | GET | `/health` | Confirma que el servidor está disponible. | `200` |
 | POST | `/simulaciones/configuracion` | Valida y guarda la última configuración. | `201`, `422` |
 | GET | `/simulaciones/configuracion` | Devuelve la última configuración registrada. | `200`, `404` si todavía no existe |
+| POST | `/simulaciones/guardadas` | Guarda una simulación con nombre y la selecciona cuando no hay otra en ejecución. | `201`, `422` |
+| GET | `/simulaciones/guardadas` | Lista las simulaciones guardadas de forma persistente. | `200` |
+| POST | `/simulaciones/guardadas/{id}/seleccionar` | Carga una simulación guardada para iniciarla o reanudarla. | `200`, `404`, `409` si hay otra en ejecución |
 | POST | `/simulaciones/iniciar` | Inicia con la configuración registrada. No acepta cuerpo. | `200`, `400` si falta configuración o ya está en ejecución |
 | POST | `/simulaciones/detener` | Detiene una simulación activa. No acepta cuerpo. | `200`, `400` si no hay ejecución activa |
 | GET | `/simulaciones/estado` | Consulta el estado y la configuración asociada, si existe. | `200` |
@@ -276,7 +279,7 @@ El error se devuelve también si falta un campo, el terreno no está permitido, 
 
 ## 8. Almacenamiento temporal
 
-La implementación guarda `configuracion_actual` y `estado_simulacion` en variables en memoria del proceso Python. No utiliza una base de datos. Al reiniciar el servidor, se pierde la configuración y el estado vuelve a `sin_configurar`. Por la misma razón, este almacenamiento no debe considerarse compartido entre varios procesos de servidor.
+La biblioteca de simulaciones se guarda en `backend/simulaciones.db` mediante SQLite y sobrevive al reinicio del servidor. El estado de ejecución y la configuración activa siguen en memoria y vuelven a `sin_configurar` al reiniciar. El almacenamiento activo tampoco se comparte entre varios procesos del servidor.
 
 ## 9. Uso futuro desde el módulo 3D
 

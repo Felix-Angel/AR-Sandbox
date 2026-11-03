@@ -1,3 +1,5 @@
+import sqlite3
+from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, status
@@ -70,9 +72,52 @@ class RespuestaEstado(BaseModel):
     configuracion: ConfiguracionSimulacion | None
 
 
+class SolicitudSimulacionGuardada(ConfiguracionSimulacion):
+    nombre: str = Field(min_length=1, max_length=60)
+
+    @field_validator("nombre")
+    @classmethod
+    def validar_nombre(cls, valor: str) -> str:
+        nombre = valor.strip()
+        if not nombre:
+            raise ValueError("El nombre no puede estar vacío.")
+        return nombre
+
+
+class SimulacionGuardada(BaseModel):
+    id: int
+    nombre: str
+    configuracion: ConfiguracionSimulacion
+
+
+class RespuestaSimulacionGuardada(RespuestaConfiguracion):
+    id: int
+    nombre: str
+
+
 # Almacenamiento temporal del último ajuste y estado de la simulación.
 configuracion_actual: ConfiguracionSimulacion | None = None
 estado_simulacion: Estado = "sin_configurar"
+RUTA_BASE_DATOS = Path(__file__).with_name("simulaciones.db")
+
+
+def conectar_base_datos():
+    conexion = sqlite3.connect(RUTA_BASE_DATOS)
+    conexion.row_factory = sqlite3.Row
+    return conexion
+
+
+with conectar_base_datos() as conexion:
+    conexion.execute(
+        """CREATE TABLE IF NOT EXISTS simulaciones_guardadas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT NOT NULL,
+            terreno TEXT NOT NULL,
+            color TEXT NOT NULL,
+            altura REAL NOT NULL,
+            creada_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )"""
+    )
 
 
 @app.get("/", tags=["Información"], summary="Información del backend")
@@ -138,6 +183,100 @@ async def obtener_configuracion():
 
     return {
         "mensaje": "Configuración actual",
+        "estado": estado_simulacion,
+        "configuracion": configuracion_actual,
+    }
+
+
+@app.get(
+    "/simulaciones/guardadas",
+    response_model=list[SimulacionGuardada],
+    tags=["Simulaciones"],
+    summary="Listar simulaciones guardadas",
+)
+async def listar_simulaciones_guardadas():
+    with conectar_base_datos() as conexion:
+        filas = conexion.execute(
+            "SELECT id, nombre, terreno, color, altura "
+            "FROM simulaciones_guardadas ORDER BY creada_en DESC, id DESC"
+        ).fetchall()
+    return [
+        {
+            "id": fila["id"],
+            "nombre": fila["nombre"],
+            "configuracion": {
+                "terreno": fila["terreno"],
+                "color": fila["color"],
+                "altura": fila["altura"],
+            },
+        }
+        for fila in filas
+    ]
+
+
+@app.post(
+    "/simulaciones/guardadas",
+    response_model=RespuestaSimulacionGuardada,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Simulaciones"],
+    summary="Guardar simulación con nombre",
+)
+async def guardar_simulacion(solicitud: SolicitudSimulacionGuardada):
+    global configuracion_actual, estado_simulacion
+
+    config = ConfiguracionSimulacion(
+        terreno=solicitud.terreno,
+        color=solicitud.color,
+        altura=solicitud.altura,
+    )
+    with conectar_base_datos() as conexion:
+        cursor = conexion.execute(
+            "INSERT INTO simulaciones_guardadas (nombre, terreno, color, altura) "
+            "VALUES (?, ?, ?, ?)",
+            (solicitud.nombre, config.terreno, config.color, config.altura),
+        )
+        simulacion_id = cursor.lastrowid
+
+    # Guardar una nueva variante no reemplaza una simulación que ya está corriendo.
+    if estado_simulacion != "en_ejecucion":
+        configuracion_actual = config
+        estado_simulacion = "lista"
+
+    return {
+        "id": simulacion_id,
+        "nombre": solicitud.nombre,
+        "mensaje": f'Simulación "{solicitud.nombre}" guardada correctamente',
+        "estado": estado_simulacion,
+        "configuracion": configuracion_actual or config,
+    }
+
+
+@app.post(
+    "/simulaciones/guardadas/{simulacion_id}/seleccionar",
+    response_model=RespuestaConfiguracion,
+    tags=["Simulaciones"],
+    summary="Seleccionar simulación guardada",
+)
+async def seleccionar_simulacion(simulacion_id: int):
+    global configuracion_actual, estado_simulacion
+
+    if estado_simulacion == "en_ejecucion":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Detén la simulación actual antes de seleccionar otra.",
+        )
+    with conectar_base_datos() as conexion:
+        fila = conexion.execute(
+            "SELECT terreno, color, altura FROM simulaciones_guardadas WHERE id = ?",
+            (simulacion_id,),
+        ).fetchone()
+    if fila is None:
+        raise HTTPException(status_code=404, detail="Simulación guardada no encontrada.")
+
+    configuracion_actual = ConfiguracionSimulacion(**dict(fila))
+    estado_simulacion = "lista"
+    return {
+        "mensaje": "Simulación seleccionada y lista para iniciar",
         "estado": estado_simulacion,
         "configuracion": configuracion_actual,
     }

@@ -74,19 +74,29 @@ async function consultarBackend({ silenciosa = false } = {}) {
   error.value = ''
 
   try {
-    const health = await backendService.healthCheck({ signal: controller.signal })
-    if (!componenteActivo || controller.signal.aborted) return
-
-    conectado.value = health?.estado === 'activo'
     const estadoActual = await backendService.getEstado({ signal: controller.signal })
     if (!componenteActivo || controller.signal.aborted) return
 
-    if (estadoActual?.configuracion) {
+    // La respuesta de /simulaciones/estado es también la comprobación real de
+    // conectividad. No hacer depender la lectura del terreno de /health evita
+    // que un fallo aislado de salud deje el panel sin consultar su endpoint.
+    if (!estadoActual || typeof estadoActual.estado !== 'string'
+      || !('configuracion' in estadoActual)
+      || (estadoActual.configuracion !== null
+        && (typeof estadoActual.configuracion !== 'object'
+          || typeof estadoActual.configuracion.terreno !== 'string'
+          || typeof estadoActual.configuracion.color !== 'string'
+          || !Number.isFinite(Number(estadoActual.configuracion.altura))))) {
+      throw new Error('FastAPI devolvió un estado o una configuración con formato no válido.')
+    }
+
+    conectado.value = true
+    if (estadoActual.configuracion) {
       configuracion.value = estadoActual.configuracion
-      estado.value = estadoActual.estado || 'lista'
+      estado.value = estadoActual.estado
     } else {
       configuracion.value = null
-      estado.value = estadoActual?.estado || 'sin_configurar'
+      estado.value = estadoActual.estado
     }
 
     ultimaActualizacion.value = formatearHora()
@@ -251,8 +261,12 @@ function publicarCambioCamara(estadoRecibido) {
   if (serializado === ultimaCamaraEnviada) return
 
   ultimaCamaraEnviada = serializado
-  estadoCamara.value = JSON.parse(serializado)
-  canalProyector?.enviar('camera-update', { estadoCamara: estadoCamara.value })
+  const estadoCamaraPlano = JSON.parse(serializado)
+  estadoCamara.value = estadoCamaraPlano
+  // ref() convierte el objeto asignado en un Proxy reactivo de Vue. El Proxy
+  // no se puede enviar con structured clone por BroadcastChannel; publica el
+  // objeto plano serializado que conserva exactamente los mismos valores.
+  canalProyector?.enviar('camera-update', { estadoCamara: estadoCamaraPlano })
 }
 
 function abrirVentanaProyeccion() {

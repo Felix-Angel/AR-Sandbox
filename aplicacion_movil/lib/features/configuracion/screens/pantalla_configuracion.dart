@@ -4,6 +4,7 @@ import '../../../core/network/backend_api_service.dart';
 import '../../../core/network/models/configuracion_simulacion.dart';
 import '../../../core/network/models/respuesta_simulacion.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/widgets/imagen_terreno.dart';
 
 @immutable
 class ConfiguracionTerreno {
@@ -58,7 +59,7 @@ class PantallaConfiguracion extends StatefulWidget {
     required this.configuracionGuardada,
     required this.registroEnCurso,
     required this.onConfiguracionChanged,
-    required this.onRegistrarConfiguracion,
+    required this.onGuardarSimulacion,
   });
 
   final String terreno;
@@ -66,8 +67,8 @@ class PantallaConfiguracion extends StatefulWidget {
   final bool configuracionGuardada;
   final bool registroEnCurso;
   final ValueChanged<ConfiguracionTerreno> onConfiguracionChanged;
-  final Future<RespuestaSimulacion> Function(SolicitudConfiguracion)
-  onRegistrarConfiguracion;
+  final Future<RespuestaSimulacion> Function(String, SolicitudConfiguracion)
+  onGuardarSimulacion;
 
   @override
   State<PantallaConfiguracion> createState() => _PantallaConfiguracionState();
@@ -93,16 +94,32 @@ class _PantallaConfiguracionState extends State<PantallaConfiguracion> {
     );
   }
 
-  Future<void> _guardarConfiguracion() async {
-    if (_enviando || widget.registroEnCurso) return;
-    setState(() => _enviando = true);
+  Future<SolicitudConfiguracion?> _crearSolicitud() async {
     try {
-      final solicitud = SolicitudConfiguracion.desdeInterfaz(
+      return SolicitudConfiguracion.desdeInterfaz(
         terreno: widget.terreno,
         color: widget.configuracion.nombreColor,
         altura: widget.configuracion.altura,
       );
-      final respuesta = await widget.onRegistrarConfiguracion(solicitud);
+    } on ArgumentError catch (error) {
+      _mostrarError('Revisa la selección antes de guardar: ${error.message}');
+      return null;
+    }
+  }
+
+  Future<void> _guardarSimulacion() async {
+    if (_enviando || widget.registroEnCurso) return;
+    final nombre = await showDialog<String>(
+      context: context,
+      builder: (context) => const _DialogoNombreSimulacion(),
+    );
+    if (nombre == null || nombre.isEmpty || !mounted) return;
+
+    final solicitud = await _crearSolicitud();
+    if (solicitud == null || !mounted) return;
+    setState(() => _enviando = true);
+    try {
+      final respuesta = await widget.onGuardarSimulacion(nombre, solicitud);
       if (!mounted) return;
       setState(() => _respuestaRegistro = respuesta);
       ScaffoldMessenger.of(context)
@@ -112,7 +129,8 @@ class _PantallaConfiguracionState extends State<PantallaConfiguracion> {
     } on BackendApiException catch (error) {
       final mensaje = switch (error.statusCode) {
         400 => 'El backend rechazó la operación: ${error.message}',
-        404 => 'No se encontró el endpoint de configuración. ${error.message}',
+        404 =>
+          'No se encontró la ruta para guardar la simulación. ${error.message}',
         422 => 'Los datos no cumplen el contrato: ${error.message}',
         null => 'No se pudo conectar con el servidor. Verifica que FastAPI esté activo y vuelve a intentar.',
         _ => 'No se pudo guardar la configuración: ${error.message}',
@@ -132,7 +150,7 @@ class _PantallaConfiguracionState extends State<PantallaConfiguracion> {
   void _mostrarError(String mensaje) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(mensaje), backgroundColor: AppTheme.terracota),
+      SnackBar(content: Text(mensaje), backgroundColor: AppTheme.canela),
     );
   }
 
@@ -141,12 +159,29 @@ class _PantallaConfiguracionState extends State<PantallaConfiguracion> {
     final config = widget.configuracion;
     final controlesDeshabilitados = _enviando || widget.registroEnCurso;
     return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 112),
       children: [
-        Text(
-          'Personaliza tu terreno',
-          style: Theme.of(context).textTheme.headlineSmall
-              ?.copyWith(color: AppTheme.tinta, fontWeight: FontWeight.bold),
+        Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(11),
+              decoration: BoxDecoration(
+                color: AppTheme.canela.withValues(alpha: .12),
+                borderRadius: BorderRadius.circular(15),
+              ),
+              child: const Icon(Icons.tune_rounded, color: AppTheme.canela),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Personaliza tu terreno',
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  color: AppTheme.texto,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 6),
         Text(
@@ -155,16 +190,49 @@ class _PantallaConfiguracionState extends State<PantallaConfiguracion> {
         ),
         const SizedBox(height: 18),
         Card(
-          child: ListTile(
-            leading: CircleAvatar(
-              backgroundColor: AppTheme.verde.withValues(alpha: .12),
-              child: const Icon(Icons.landscape_rounded, color: AppTheme.verde),
+          clipBehavior: Clip.antiAlias,
+          child: SizedBox(
+            height: 148,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                ImagenTerreno(terreno: widget.terreno),
+                const DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Colors.transparent, Color(0xCC2D1C14)],
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: 16,
+                  right: 16,
+                  bottom: 14,
+                  child: Row(
+                    children: [
+                      const Icon(Icons.landscape_rounded, color: Colors.white),
+                      const SizedBox(width: 9),
+                      Expanded(
+                        child: Text(
+                          widget.terreno,
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w800,
+                              ),
+                        ),
+                      ),
+                      const Icon(
+                        Icons.check_circle_rounded,
+                        color: AppTheme.caramelo,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-            title: Text(
-              widget.terreno,
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-            subtitle: const Text('Tipo de relieve'),
           ),
         ),
         const SizedBox(height: 22),
@@ -207,13 +275,15 @@ class _PantallaConfiguracionState extends State<PantallaConfiguracion> {
                       color: color,
                       borderRadius: BorderRadius.circular(18),
                       border: Border.all(
-                        color: seleccionado ? AppTheme.verde : AppTheme.borde,
+                        color: seleccionado
+                            ? AppTheme.espresso
+                            : AppTheme.arena,
                         width: seleccionado ? 3 : 1,
                       ),
                       boxShadow: [
                         if (seleccionado)
                           BoxShadow(
-                            color: AppTheme.verde.withValues(alpha: .17),
+                            color: AppTheme.espresso.withValues(alpha: .17),
                             blurRadius: 12,
                             offset: const Offset(0, 4),
                           ),
@@ -224,7 +294,7 @@ class _PantallaConfiguracionState extends State<PantallaConfiguracion> {
                             Icons.check_rounded,
                             color: color.computeLuminance() < .35
                                 ? Colors.white
-                                : AppTheme.tinta,
+                                : AppTheme.texto,
                           )
                         : null,
                   ),
@@ -246,7 +316,7 @@ class _PantallaConfiguracionState extends State<PantallaConfiguracion> {
             Text(
               '${config.altura.round()}%',
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                color: AppTheme.verde,
+                color: AppTheme.espresso,
                 fontWeight: FontWeight.bold,
               ),
             ),
@@ -257,7 +327,7 @@ class _PantallaConfiguracionState extends State<PantallaConfiguracion> {
           min: 0,
           max: 100,
           divisions: 20,
-          activeColor: AppTheme.verde,
+          activeColor: AppTheme.canela,
           label: '${config.altura.round()}%',
           onChanged: controlesDeshabilitados
               ? null
@@ -270,11 +340,11 @@ class _PantallaConfiguracionState extends State<PantallaConfiguracion> {
         const SizedBox(height: 22),
         if (widget.configuracionGuardada && _respuestaRegistro != null)
           Card(
-            color: AppTheme.verde.withValues(alpha: .08),
+            color: AppTheme.espresso.withValues(alpha: .08),
             child: ListTile(
               leading: const Icon(
                 Icons.cloud_done_outlined,
-                color: AppTheme.verde,
+                color: AppTheme.espresso,
               ),
               title: const Text('Configuración guardada en FastAPI'),
               subtitle: Text(
@@ -299,7 +369,7 @@ class _PantallaConfiguracionState extends State<PantallaConfiguracion> {
                   icono: Icons.terrain_rounded,
                   etiqueta: 'Terreno',
                   valor: widget.terreno,
-                  color: AppTheme.verde,
+                  color: AppTheme.espresso,
                 ),
                 const SizedBox(height: 10),
                 _DatoResumen(
@@ -313,29 +383,77 @@ class _PantallaConfiguracionState extends State<PantallaConfiguracion> {
                   icono: Icons.height_rounded,
                   etiqueta: 'Altura',
                   valor: '${config.altura.round()}%',
-                  color: AppTheme.terracota,
+                  color: AppTheme.canela,
                 ),
               ],
             ),
           ),
         ),
         const SizedBox(height: 18),
-        FilledButton.icon(
-          onPressed: controlesDeshabilitados ? null : _guardarConfiguracion,
-          icon: _enviando
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.cloud_upload_outlined),
-          label: Text(
-            _enviando ? 'Guardando configuración…' : 'Guardar configuración',
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            onPressed: controlesDeshabilitados ? null : _guardarSimulacion,
+            icon: _enviando
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.bookmark_add_outlined),
+            label: Text(
+              _enviando ? 'Guardando simulación…' : 'Guardar simulación',
+            ),
           ),
         ),
       ],
     );
   }
+}
+
+class _DialogoNombreSimulacion extends StatefulWidget {
+  const _DialogoNombreSimulacion();
+
+  @override
+  State<_DialogoNombreSimulacion> createState() =>
+      _DialogoNombreSimulacionState();
+}
+
+class _DialogoNombreSimulacionState extends State<_DialogoNombreSimulacion> {
+  final _controladorNombre = TextEditingController();
+
+  @override
+  void dispose() {
+    _controladorNombre.dispose();
+    super.dispose();
+  }
+
+  void _confirmar() {
+    Navigator.of(context).pop(_controladorNombre.text.trim());
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Guardar simulación'),
+    content: TextField(
+      controller: _controladorNombre,
+      autofocus: true,
+      maxLength: 60,
+      textCapitalization: TextCapitalization.sentences,
+      decoration: const InputDecoration(
+        labelText: 'Nombre',
+        hintText: 'Ej. Llanura turquesa',
+      ),
+      onSubmitted: (_) => _confirmar(),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(),
+        child: const Text('Cancelar'),
+      ),
+      FilledButton(onPressed: _confirmar, child: const Text('Guardar')),
+    ],
+  );
 }
 
 class _DatoResumen extends StatelessWidget {
@@ -361,7 +479,7 @@ class _DatoResumen extends StatelessWidget {
         child: Text(
           etiqueta,
           style: Theme.of(context).textTheme.bodyMedium
-              ?.copyWith(color: AppTheme.tinta.withValues(alpha: .7)),
+              ?.copyWith(color: AppTheme.texto.withValues(alpha: .7)),
         ),
       ),
       Expanded(

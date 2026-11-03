@@ -57,6 +57,76 @@ class BackendApiService {
     return EstadoSimulacion.fromJson(json);
   }
 
+  Future<List<SimulacionGuardada>> listarSimulacionesGuardadas() async {
+    final uri = _baseUri.resolve('/simulaciones/guardadas');
+    try {
+      final request = await _httpClient
+          .getUrl(uri)
+          .timeout(const Duration(seconds: 10));
+      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      final response = await request.close().timeout(
+        const Duration(seconds: 10),
+      );
+      final decoded = jsonDecode(await utf8.decoder.bind(response).join());
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw BackendApiException.fromResponse(response.statusCode, decoded);
+      }
+      if (decoded is! List) {
+        throw const FormatException('La lista de simulaciones no es válida.');
+      }
+      return decoded
+          .map(
+            (item) => SimulacionGuardada.fromJson(
+              Map<String, dynamic>.from(item as Map),
+            ),
+          )
+          .toList();
+    } on BackendApiException {
+      rethrow;
+    } on SocketException catch (error) {
+      throw BackendApiException(
+        message: 'No se pudo conectar con el backend: ${error.message}',
+        cause: error,
+      );
+    } on FormatException catch (error) {
+      throw BackendApiException(
+        message: 'No se pudo interpretar la lista guardada: ${error.message}',
+        cause: error,
+      );
+    } on TimeoutException catch (error) {
+      throw BackendApiException(
+        message: 'La consulta de simulaciones superó el tiempo de espera.',
+        cause: error,
+      );
+    } on HttpException catch (error) {
+      throw BackendApiException(
+        message: 'Error HTTP al consultar simulaciones: ${error.message}',
+        cause: error,
+      );
+    }
+  }
+
+  Future<RespuestaSimulacion> guardarSimulacion(
+    String nombre,
+    SolicitudConfiguracion configuracion,
+  ) async {
+    final json = await _request(
+      'POST',
+      '/simulaciones/guardadas',
+      body: {'nombre': nombre, ...configuracion.toJson()},
+      expectedStatus: 201,
+    );
+    return RespuestaSimulacion.fromJson(json);
+  }
+
+  Future<RespuestaSimulacion> seleccionarSimulacion(int id) async {
+    final json = await _request(
+      'POST',
+      '/simulaciones/guardadas/$id/seleccionar',
+    );
+    return RespuestaSimulacion.fromJson(json);
+  }
+
   Future<Map<String, dynamic>> _request(
     String method,
     String path, {

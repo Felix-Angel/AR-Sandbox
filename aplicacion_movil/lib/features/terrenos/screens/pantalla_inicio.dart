@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../core/network/backend_api_service.dart';
 import '../../../core/network/backend_config.dart';
@@ -8,6 +10,7 @@ import '../../../core/network/models/configuracion_simulacion.dart'
     show ConfiguracionSimulacion, SolicitudConfiguracion, TerrenosApi;
 import '../../../core/network/models/respuesta_simulacion.dart' as api_models;
 import '../../../core/theme/app_theme.dart';
+import '../../../core/widgets/imagen_terreno.dart';
 import '../../configuracion/screens/pantalla_configuracion.dart';
 import '../../simulacion/screens/pantalla_simulacion.dart';
 
@@ -34,6 +37,8 @@ class _PantallaInicioState extends State<PantallaInicio> {
   bool _operacionSimulacionEnCurso = false;
   bool _estadoConfirmado = false;
   String? _errorBackend;
+  List<api_models.SimulacionGuardada> _simulacionesGuardadas = [];
+  int? _simulacionSeleccionadaId;
   BackendApiService? _ownedBackendApi;
 
   BackendApiService get _backendApi =>
@@ -42,6 +47,30 @@ class _PantallaInicioState extends State<PantallaInicio> {
   void _irA(int seccion) {
     setState(() => _seccion = seccion);
     if (seccion == 3) unawaited(_consultarEstado());
+  }
+
+  void _iniciarNuevaSimulacion() {
+    if (_estadoConfirmado &&
+        _estadoSimulacion == EstadoSimulacion.enEjecucion) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Detén la simulación actual antes de crear otra.'),
+        ),
+      );
+      _irA(3);
+      return;
+    }
+    setState(() {
+      _terreno = null;
+      _configuracion = const ConfiguracionTerreno(
+        color: AppTheme.verde,
+        altura: 50,
+      );
+      _configuracionGuardada = false;
+      _estadoConfirmado = false;
+      _simulacionSeleccionadaId = null;
+      _seccion = 1;
+    });
   }
 
   EstadoSimulacion _estadoDesdeApi(api_models.EstadoSimulacionApi estado) =>
@@ -88,9 +117,18 @@ class _PantallaInicioState extends State<PantallaInicio> {
     });
     try {
       final respuesta = await _backendApi.obtenerEstado();
+      var simulaciones = _simulacionesGuardadas;
+      try {
+        simulaciones = await _backendApi.listarSimulacionesGuardadas();
+      } on BackendApiException {
+        // La consulta del estado sigue siendo útil aunque la biblioteca no
+        // esté disponible todavía (por ejemplo, con un backend anterior).
+      }
       if (!mounted) return;
       setState(() {
         _sincronizarDesdeBackend(respuesta.estado, respuesta.configuracion);
+        _simulacionesGuardadas = simulaciones;
+        _simulacionSeleccionadaId = _idDeConfiguracion(respuesta.configuracion);
         _estadoConfirmado = true;
       });
     } on BackendApiException catch (error) {
@@ -132,7 +170,21 @@ class _PantallaInicioState extends State<PantallaInicio> {
     }
   }
 
-  Future<api_models.RespuestaSimulacion> _registrarConfiguracion(
+  int? _idDeConfiguracion(ConfiguracionSimulacion? configuracion) {
+    if (configuracion == null) return null;
+    for (final simulacion in _simulacionesGuardadas) {
+      final guardada = simulacion.configuracion;
+      if (guardada.terreno == configuracion.terreno &&
+          guardada.color == configuracion.color &&
+          guardada.altura == configuracion.altura) {
+        return simulacion.id;
+      }
+    }
+    return null;
+  }
+
+  Future<api_models.RespuestaSimulacion> _guardarSimulacion(
+    String nombre,
     SolicitudConfiguracion solicitud,
   ) async {
     if (_registroEnCurso) {
@@ -143,25 +195,53 @@ class _PantallaInicioState extends State<PantallaInicio> {
       _configuracionGuardada = false;
     });
     try {
-      final respuesta = await _backendApi.registrarConfiguracion(solicitud);
+      final respuesta = await _backendApi.guardarSimulacion(nombre, solicitud);
+      final simulaciones = await _backendApi.listarSimulacionesGuardadas();
       if (mounted) {
-        final coincideConLaActual =
-            _terreno != null &&
-            TerrenosApi.aId(_terreno!) == solicitud.terreno &&
-            _configuracion.nombreColor == solicitud.color &&
-            _configuracion.altura == solicitud.altura;
         setState(() {
-          if (coincideConLaActual) {
-            _aplicarRespuestaBackend(respuesta);
-          } else {
-            _configuracionGuardada = false;
-            _estadoConfirmado = false;
-          }
+          _simulacionesGuardadas = simulaciones;
+          _aplicarRespuestaBackend(respuesta);
+          _simulacionSeleccionadaId = _idDeConfiguracion(
+            respuesta.configuracion,
+          );
         });
       }
       return respuesta;
     } finally {
       if (mounted) setState(() => _registroEnCurso = false);
+    }
+  }
+
+  Future<void> _seleccionarSimulacion(int id) async {
+    if (_operacionSimulacionEnCurso || !_estadoConfirmado) return;
+    setState(() {
+      _operacionSimulacionEnCurso = true;
+      _errorBackend = null;
+    });
+    try {
+      final respuesta = await _backendApi.seleccionarSimulacion(id);
+      if (!mounted) return;
+      setState(() {
+        _aplicarRespuestaBackend(respuesta);
+        _simulacionSeleccionadaId = id;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Simulación seleccionada. Ya puedes iniciarla.'),
+        ),
+      );
+    } on BackendApiException catch (error) {
+      if (mounted) {
+        setState(() => _errorBackend = error.message);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(error.message),
+            backgroundColor: AppTheme.canela,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _operacionSimulacionEnCurso = false);
     }
   }
 
@@ -179,6 +259,7 @@ class _PantallaInicioState extends State<PantallaInicio> {
         configuracion: _configuracion,
         configuracionGuardada: _configuracionGuardada,
         irA: _irA,
+        nuevaSimulacion: _iniciarNuevaSimulacion,
       ),
       _Terrenos(
         seleccionado: _terreno,
@@ -213,7 +294,7 @@ class _PantallaInicioState extends State<PantallaInicio> {
             _configuracionGuardada = false;
             _estadoConfirmado = false;
           }),
-          onRegistrarConfiguracion: _registrarConfiguracion,
+          onGuardarSimulacion: _guardarSimulacion,
         ),
       PantallaSimulacion(
         terreno: _terreno,
@@ -227,58 +308,164 @@ class _PantallaInicioState extends State<PantallaInicio> {
         alDetener: _detenerSimulacion,
         alActualizarEstado: () => unawaited(_consultarEstado()),
         alSeleccionarTerreno: () => _irA(1),
+        simulacionesGuardadas: _simulacionesGuardadas,
+        simulacionSeleccionadaId: _simulacionSeleccionadaId,
+        alSeleccionarSimulacion: _seleccionarSimulacion,
       ),
       const _Ajustes(),
     ];
 
     return Scaffold(
+      extendBody: true,
       appBar: AppBar(
-        title: const Text('AR Sandbox'),
-        actions: [
-          IconButton(
-            tooltip: 'Ajustes',
-            onPressed: () => _irA(4),
-            icon: const Icon(Icons.settings_outlined),
-          ),
-        ],
+        toolbarHeight: 68,
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppTheme.espresso,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(
+                Icons.public_rounded,
+                color: Colors.white,
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: 10),
+            const Text('AR Sandbox'),
+          ],
+        ),
       ),
       body: IndexedStack(index: _seccion, children: pantallas),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _seccion,
-        labelBehavior: MediaQuery.sizeOf(context).width < 400
-            ? NavigationDestinationLabelBehavior.onlyShowSelected
-            : NavigationDestinationLabelBehavior.alwaysShow,
-        onDestinationSelected: _irA,
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.home_outlined),
-            selectedIcon: Icon(Icons.home_rounded),
-            label: 'Inicio',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.terrain_outlined),
-            selectedIcon: Icon(Icons.terrain),
-            label: 'Terrenos',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.tune_outlined),
-            selectedIcon: Icon(Icons.tune),
-            label: 'Configurar',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.play_circle_outline_rounded),
-            selectedIcon: Icon(Icons.play_circle_fill_rounded),
-            label: 'Simulación',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.settings_outlined),
-            selectedIcon: Icon(Icons.settings),
-            label: 'Ajustes',
-          ),
-        ],
+      bottomNavigationBar: _BarraNavegacion(
+        selectedIndex: switch (_seccion) {
+          0 => 0,
+          1 || 2 => 1,
+          3 => 2,
+          _ => 3,
+        },
+        onDestinationSelected: (index) => switch (index) {
+          0 => _irA(0),
+          1 => _iniciarNuevaSimulacion(),
+          2 => _irA(3),
+          _ => _irA(4),
+        },
       ),
     );
   }
+}
+
+class _BarraNavegacion extends StatelessWidget {
+  const _BarraNavegacion({
+    required this.selectedIndex,
+    required this.onDestinationSelected,
+  });
+
+  final int selectedIndex;
+  final ValueChanged<int> onDestinationSelected;
+
+  static const _destinos = [
+    (Icons.home_outlined, Icons.home_rounded, 'Inicio'),
+    (Icons.add_rounded, Icons.add_rounded, 'Crear'),
+    (Icons.bookmark_border_rounded, Icons.bookmark_rounded, 'Guardadas'),
+    (Icons.settings_outlined, Icons.settings_rounded, 'Ajustes'),
+  ];
+
+  @override
+  Widget build(BuildContext context) => SafeArea(
+    top: false,
+    minimum: const EdgeInsets.fromLTRB(18, 0, 18, 8),
+    child: PhysicalModel(
+      color: Colors.transparent,
+      elevation: 12,
+      shadowColor: AppTheme.texto.withValues(alpha: .15),
+      borderRadius: BorderRadius.circular(28),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(28),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 7),
+            decoration: BoxDecoration(
+              color: AppTheme.superficie.withValues(alpha: .9),
+              borderRadius: BorderRadius.circular(28),
+              border: Border.all(
+                color: AppTheme.superficie.withValues(alpha: .95),
+              ),
+            ),
+            child: Row(
+              children: List.generate(_destinos.length, (index) {
+                final (icono, iconoActivo, etiqueta) = _destinos[index];
+                final activo = selectedIndex == index;
+                return Expanded(
+                  child: Semantics(
+                    button: true,
+                    selected: activo,
+                    label: etiqueta,
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(22),
+                        onTap: () {
+                          unawaited(HapticFeedback.selectionClick());
+                          onDestinationSelected(index);
+                        },
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 260),
+                          curve: Curves.easeOutCubic,
+                          padding: const EdgeInsets.symmetric(vertical: 5),
+                          decoration: BoxDecoration(
+                            color: activo
+                                ? AppTheme.espresso.withValues(alpha: .09)
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(22),
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              AnimatedScale(
+                                scale: activo ? 1.08 : 1,
+                                duration: const Duration(milliseconds: 220),
+                                curve: Curves.easeOutBack,
+                                child: Icon(
+                                  activo ? iconoActivo : icono,
+                                  color: activo
+                                      ? AppTheme.espresso
+                                      : AppTheme.texto.withValues(alpha: .62),
+                                  size: 22,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              AnimatedDefaultTextStyle(
+                                duration: const Duration(milliseconds: 180),
+                                style: TextStyle(
+                                  color: activo
+                                      ? AppTheme.espresso
+                                      : AppTheme.texto.withValues(alpha: .62),
+                                  fontSize: 10.5,
+                                  fontWeight: activo
+                                      ? FontWeight.w800
+                                      : FontWeight.w500,
+                                ),
+                                child: Text(etiqueta, maxLines: 1),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 class _Inicio extends StatelessWidget {
@@ -287,30 +474,32 @@ class _Inicio extends StatelessWidget {
     required this.configuracion,
     required this.configuracionGuardada,
     required this.irA,
+    required this.nuevaSimulacion,
   });
 
   final String? terreno;
   final ConfiguracionTerreno configuracion;
   final bool configuracionGuardada;
   final ValueChanged<int> irA;
+  final VoidCallback nuevaSimulacion;
 
   @override
   Widget build(BuildContext context) => ListView(
-    padding: const EdgeInsets.fromLTRB(18, 18, 18, 28),
+    padding: const EdgeInsets.fromLTRB(18, 18, 18, 112),
     children: [
       Text(
-        '¡Bienvenido!',
+        'Tu laboratorio de paisajes',
         style: Theme.of(context).textTheme.headlineSmall
-            ?.copyWith(color: AppTheme.tinta, fontWeight: FontWeight.w800),
+            ?.copyWith(color: AppTheme.texto, fontWeight: FontWeight.w800),
       ),
       const SizedBox(height: 6),
       Text(
-        'Explora, crea y aprende. Modela el paisaje y descubre cómo cambia el terreno.',
+        'Explora relieves, crea nuevas escenas y ajusta cada detalle.',
         style: Theme.of(context).textTheme.bodyMedium
-            ?.copyWith(color: AppTheme.tinta.withValues(alpha: .78)),
+            ?.copyWith(color: AppTheme.texto.withValues(alpha: .78)),
       ),
       const SizedBox(height: 18),
-      _HeroSimulacion(onTap: () => irA(3)),
+      _HeroSimulacion(onTap: nuevaSimulacion, terreno: terreno),
       const SizedBox(height: 18),
       Card(
         clipBehavior: Clip.antiAlias,
@@ -323,10 +512,7 @@ class _Inicio extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    const Icon(
-                      Icons.history_rounded,
-                      color: AppTheme.terracota,
-                    ),
+                    const Icon(Icons.history_rounded, color: AppTheme.canela),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -389,186 +575,101 @@ class _Inicio extends StatelessWidget {
           ),
         ),
       ),
-      const SizedBox(height: 18),
-      Text(
-        'Accesos rápidos',
-        style: Theme.of(context).textTheme.titleLarge
-            ?.copyWith(fontWeight: FontWeight.bold),
-      ),
-      const SizedBox(height: 10),
-      Row(
-        children: [
-          Expanded(
-            child: _AccesoInicio(
-              icono: Icons.terrain_rounded,
-              titulo: 'Terrenos',
-              detalle: 'Elige un paisaje',
-              color: AppTheme.verde,
-              onTap: () => irA(1),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: _AccesoInicio(
-              icono: Icons.tune_rounded,
-              titulo: 'Configurar',
-              detalle: terreno == null ? 'Primero elige' : 'Color y altura',
-              color: AppTheme.terracota,
-              onTap: () => irA(terreno == null ? 1 : 2),
-            ),
-          ),
-        ],
-      ),
-      const SizedBox(height: 14),
-      _EstadoConexion(configuracionGuardada: configuracionGuardada),
     ],
   );
 }
 
 class _HeroSimulacion extends StatelessWidget {
-  const _HeroSimulacion({required this.onTap});
+  const _HeroSimulacion({required this.onTap, required this.terreno});
   final VoidCallback onTap;
+  final String? terreno;
 
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(20),
-    decoration: BoxDecoration(
-      gradient: const LinearGradient(
-        colors: [AppTheme.verde, Color(0xFF47785B)],
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
+  Widget build(BuildContext context) => AnimatedSwitcher(
+    duration: const Duration(milliseconds: 650),
+    switchInCurve: Curves.easeOutCubic,
+    switchOutCurve: Curves.easeInCubic,
+    transitionBuilder: (child, animation) => FadeTransition(
+      opacity: animation,
+      child: ScaleTransition(
+        scale: Tween<double>(begin: .96, end: 1).animate(animation),
+        child: child,
       ),
-      borderRadius: BorderRadius.circular(24),
-      boxShadow: [
-        BoxShadow(
-          color: AppTheme.verde.withValues(alpha: .2),
-          blurRadius: 18,
-          offset: const Offset(0, 8),
-        ),
-      ],
     ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            const Expanded(
-              child: Text(
-                'Dale forma a tu paisaje',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
+    child: Container(
+      key: ValueKey(terreno ?? 'default-terrain'),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        image: DecorationImage(
+          image: AssetImage(ImagenTerreno.rutaPara(terreno)),
+          fit: BoxFit.cover,
+          colorFilter: ColorFilter.mode(
+            AppTheme.texto.withValues(alpha: .6),
+            BlendMode.darken,
+          ),
+        ),
+        gradient: const LinearGradient(
+          colors: [AppTheme.espresso, AppTheme.cafe],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.espresso.withValues(alpha: .2),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Dale forma a tu paisaje',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
-            ),
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: .14),
-                borderRadius: BorderRadius.circular(16),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: .14),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Icon(
+                  Icons.public_rounded,
+                  color: AppTheme.caramelo,
+                  size: 30,
+                ),
               ),
-              child: const Icon(
-                Icons.public_rounded,
-                color: AppTheme.maiz,
-                size: 30,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Inicia una nueva simulación y crea un relieve a tu medida.',
-          style: TextStyle(color: Colors.white.withValues(alpha: .9)),
-        ),
-        const SizedBox(height: 16),
-        FilledButton.icon(
-          style: FilledButton.styleFrom(
-            backgroundColor: AppTheme.maiz,
-            foregroundColor: AppTheme.tinta,
+            ],
           ),
-          onPressed: onTap,
-          icon: const Icon(Icons.play_arrow_rounded),
-          label: const Text('Nueva simulación'),
-        ),
-      ],
-    ),
-  );
-}
-
-class _AccesoInicio extends StatelessWidget {
-  const _AccesoInicio({
-    required this.icono,
-    required this.titulo,
-    required this.detalle,
-    required this.color,
-    required this.onTap,
-  });
-  final IconData icono;
-  final String titulo;
-  final String detalle;
-  final Color color;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) => Card(
-    child: InkWell(
-      borderRadius: BorderRadius.circular(18),
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            CircleAvatar(
-              backgroundColor: color.withValues(alpha: .14),
-              child: Icon(icono, color: color),
+          const SizedBox(height: 8),
+          Text(
+            'Elige un relieve, personaliza su apariencia y guarda tu creación.',
+            style: TextStyle(color: AppTheme.superficie.withValues(alpha: .95)),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: AppTheme.caramelo,
+                foregroundColor: AppTheme.texto,
+              ),
+              onPressed: onTap,
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('Nueva simulación'),
             ),
-            const SizedBox(height: 12),
-            Text(titulo, style: const TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 3),
-            Text(detalle, style: Theme.of(context).textTheme.bodySmall),
-          ],
-        ),
-      ),
-    ),
-  );
-}
-
-class _EstadoConexion extends StatelessWidget {
-  const _EstadoConexion({required this.configuracionGuardada});
-
-  final bool configuracionGuardada;
-
-  @override
-  Widget build(BuildContext context) => Card(
-    child: ListTile(
-      leading: CircleAvatar(
-        backgroundColor: configuracionGuardada
-            ? AppTheme.verde.withValues(alpha: .12)
-            : const Color(0xFFFFF0E9),
-        child: Icon(
-          configuracionGuardada
-              ? Icons.cloud_done_rounded
-              : Icons.cloud_upload_rounded,
-          color: configuracionGuardada ? AppTheme.verde : AppTheme.terracota,
-        ),
-      ),
-      title: Text(
-        configuracionGuardada
-            ? 'Configuración registrada'
-            : 'Registro en servidor pendiente',
-        style: TextStyle(fontWeight: FontWeight.w600),
-      ),
-      subtitle: Text(
-        configuracionGuardada
-            ? 'FastAPI confirmó el registro de la configuración actual.'
-            : 'Guarda tu terreno y sus ajustes para enviarlos a FastAPI.',
-      ),
-      trailing: Icon(
-        Icons.circle,
-        size: 10,
-        color: configuracionGuardada ? AppTheme.verde : AppTheme.terracota,
+          ),
+        ],
       ),
     ),
   );
@@ -586,7 +687,7 @@ class _EstadoRegistro extends StatelessWidget {
       avatar: Icon(
         guardada ? Icons.cloud_done_outlined : Icons.cloud_upload_outlined,
         size: 18,
-        color: guardada ? AppTheme.verde : AppTheme.terracota,
+        color: guardada ? AppTheme.espresso : AppTheme.canela,
       ),
       label: Text(guardada ? 'Guardada en servidor' : 'Pendiente de registro'),
       visualDensity: VisualDensity.compact,
@@ -609,14 +710,10 @@ class _Terrenos extends StatelessWidget {
   final ValueChanged<String> alSeleccionar;
   final ValueChanged<int> irA;
   static const _terrenos = [
-    (
-      'Montañas',
-      'Cumbres altas y pendientes pronunciadas.',
-      Icons.landscape_rounded,
-    ),
-    ('Valles', 'Depresiones suaves entre montañas.', Icons.waves_rounded),
-    ('Volcanes', 'Relieves elevados con cráteres.', Icons.volcano_rounded),
-    ('Llanuras', 'Superficies amplias y casi planas.', Icons.grass_rounded),
+    ('Montañas', 'Cumbres altas y pendientes pronunciadas.'),
+    ('Valles', 'Depresiones suaves entre montañas.'),
+    ('Volcanes', 'Relieves elevados con cráteres.'),
+    ('Llanuras', 'Superficies amplias y casi planas.'),
   ];
 
   @override
@@ -624,14 +721,33 @@ class _Terrenos extends StatelessWidget {
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
       Padding(
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 4),
-        child: Text(
-          'Elige un relieve',
-          style: Theme.of(context).textTheme.headlineSmall,
+        padding: const EdgeInsets.fromLTRB(20, 22, 20, 4),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(11),
+              decoration: BoxDecoration(
+                color: AppTheme.espresso.withValues(alpha: .1),
+                borderRadius: BorderRadius.circular(15),
+              ),
+              child: const Icon(
+                Icons.terrain_rounded,
+                color: AppTheme.espresso,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Elige un relieve',
+                style: Theme.of(context).textTheme.headlineSmall
+                    ?.copyWith(fontWeight: FontWeight.w800),
+              ),
+            ),
+          ],
         ),
       ),
       const Padding(
-        padding: EdgeInsets.symmetric(horizontal: 20),
+        padding: EdgeInsets.fromLTRB(20, 2, 20, 0),
         child: Text('Toca una opción para seleccionarla.'),
       ),
       Expanded(
@@ -642,7 +758,7 @@ class _Terrenos extends StatelessWidget {
             final altoTarjeta = altoAdaptable < 160 ? 160.0 : altoAdaptable;
 
             return GridView.builder(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 96),
               itemCount: _terrenos.length,
               gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 2,
@@ -651,58 +767,96 @@ class _Terrenos extends StatelessWidget {
                 mainAxisExtent: altoTarjeta,
               ),
               itemBuilder: (context, index) {
-                final (nombre, descripcion, icono) = _terrenos[index];
+                final (nombre, descripcion) = _terrenos[index];
                 final activo = seleccionado == nombre;
                 return Card(
                   clipBehavior: Clip.antiAlias,
-                  color: activo
-                      ? AppTheme.verde.withValues(alpha: .1)
-                      : Colors.white,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(20),
                     side: BorderSide(
-                      color: activo ? AppTheme.verde : AppTheme.borde,
+                      color: activo ? AppTheme.espresso : AppTheme.arena,
                       width: activo ? 2 : 1,
                     ),
                   ),
                   child: InkWell(
                     onTap: () => alSeleccionar(nombre),
-                    child: Padding(
-                      padding: const EdgeInsets.all(8),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            icono,
-                            size: 32,
-                            color: activo ? AppTheme.terracota : AppTheme.verde,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        ImagenTerreno(
+                          terreno: nombre,
+                          escala: activo ? 1.08 : 1,
+                        ),
+                        DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                Colors.black.withValues(alpha: .02),
+                                Colors.black.withValues(alpha: .78),
+                              ],
+                            ),
                           ),
-                          const SizedBox(height: 4),
-                          Text(
-                            nombre,
-                            textAlign: TextAlign.center,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        if (activo)
+                          Positioned(
+                            top: 12,
+                            right: 12,
+                            child: Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: const BoxDecoration(
+                                color: AppTheme.caramelo,
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(
+                                Icons.check_rounded,
+                                size: 18,
+                                color: AppTheme.texto,
+                              ),
+                            ),
                           ),
-                          const SizedBox(height: 2),
-                          Text(
-                            descripcion,
-                            textAlign: TextAlign.center,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.bodySmall,
+                        Positioned(
+                          left: 14,
+                          right: 14,
+                          bottom: 14,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                nombre,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.titleMedium
+                                    ?.copyWith(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w800,
+                                      shadows: const [
+                                        Shadow(
+                                          color: Colors.black54,
+                                          blurRadius: 8,
+                                        ),
+                                      ],
+                                    ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                descripcion,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(
+                                      color: AppTheme.superficie.withValues(
+                                        alpha: .95,
+                                      ),
+                                      height: 1.25,
+                                    ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(height: 2),
-                          Icon(
-                            activo ? Icons.check_circle : Icons.circle_outlined,
-                            size: 18,
-                            color: activo
-                                ? AppTheme.terracota
-                                : AppTheme.tinta.withValues(alpha: .25),
-                          ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
                 );
@@ -713,7 +867,7 @@ class _Terrenos extends StatelessWidget {
       ),
       if (seleccionado != null)
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 96),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -737,8 +891,8 @@ class _Terrenos extends StatelessWidget {
                         ? Icons.cloud_done_outlined
                         : Icons.cloud_upload_outlined,
                     color: configuracionGuardada
-                        ? AppTheme.verde
-                        : AppTheme.terracota,
+                        ? AppTheme.espresso
+                        : AppTheme.canela,
                   ),
                 ),
               ),
@@ -768,7 +922,11 @@ class _ConfigurarVacio extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.landscape_outlined, size: 64, color: AppTheme.verde),
+          const Icon(
+            Icons.landscape_outlined,
+            size: 64,
+            color: AppTheme.espresso,
+          ),
           const SizedBox(height: 16),
           Text(
             'Primero elige un terreno',
@@ -792,27 +950,24 @@ class _Ajustes extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ListView(
-    padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+    padding: const EdgeInsets.fromLTRB(20, 20, 20, 112),
     children: [
       Text(
         'Ajustes',
-        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-          color: AppTheme.tinta,
-          fontWeight: FontWeight.w800,
-        ),
+        style: Theme.of(context).textTheme.headlineSmall
+            ?.copyWith(color: AppTheme.texto, fontWeight: FontWeight.w800),
       ),
       const SizedBox(height: 6),
       Text(
         'Información de la aplicación y conexión.',
-        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-          color: AppTheme.tinta.withValues(alpha: .72),
-        ),
+        style: Theme.of(context).textTheme.bodyMedium
+            ?.copyWith(color: AppTheme.texto.withValues(alpha: .72)),
       ),
       SizedBox(height: 16),
       Card(
         child: ListTile(
           leading: CircleAvatar(
-            backgroundColor: AppTheme.verde,
+            backgroundColor: AppTheme.espresso,
             child: Icon(Icons.landscape, color: Colors.white),
           ),
           title: Text('AR Sandbox'),
@@ -822,23 +977,23 @@ class _Ajustes extends StatelessWidget {
       const SizedBox(height: 12),
       Card(
         child: ListTile(
-          leading: const Icon(Icons.dns_outlined, color: AppTheme.verde),
+          leading: const Icon(Icons.dns_outlined, color: AppTheme.espresso),
           title: const Text('Dirección de FastAPI'),
           subtitle: Text(BackendConfig.baseUrl),
-          trailing: const Icon(Icons.lan_outlined, color: AppTheme.turquesa),
+          trailing: const Icon(Icons.lan_outlined, color: AppTheme.salvia),
         ),
       ),
       const Padding(
         padding: EdgeInsets.fromLTRB(16, 8, 16, 16),
         child: Text(
           'En el emulador Android, 10.0.2.2 apunta a tu computadora. Para un dispositivo físico se necesita la IP local del equipo.',
-          style: TextStyle(color: AppTheme.tinta, height: 1.4),
+          style: TextStyle(color: AppTheme.texto, height: 1.4),
         ),
       ),
       const SizedBox(height: 4),
       Card(
         child: ListTile(
-          leading: Icon(Icons.info_outline, color: AppTheme.turquesa),
+          leading: Icon(Icons.info_outline, color: AppTheme.salvia),
           title: Text('Aplicación móvil'),
           subtitle: Text('AR Sandbox · Versión 1.0.0'),
         ),

@@ -28,6 +28,9 @@ __pycache__/
 .venv/
 venv/
 .env
+backend/simulaciones.db
+backend/simulaciones.db-shm
+backend/simulaciones.db-wal
 
 # Node.js
 node_modules/
