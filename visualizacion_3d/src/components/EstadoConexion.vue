@@ -16,6 +16,10 @@ const props = defineProps({
     type: String,
     default: 'Sin datos',
   },
+  sensor: {
+    type: Object,
+    default: () => ({ estado: 'desconectado', conectado: false, capturando: false }),
+  },
 })
 </script>
 
@@ -38,6 +42,18 @@ const props = defineProps({
       <span class="status-label">Consulta</span>
       <span :class="['badge', props.cargando ? 'warning' : 'neutral']">
         {{ props.cargando ? 'Consultando...' : 'En espera' }}
+      </span>
+    </div>
+    <div class="status-row">
+      <span class="status-label">Kinect Xbox 360</span>
+      <span :class="['badge', props.sensor.capturando ? 'success' : props.sensor.conectado ? 'warning' : 'danger']" aria-live="polite">
+        {{ props.sensor.capturando ? 'Capturando' : props.sensor.conectado ? 'Conectado · sin datos' : 'Desconectado' }}
+      </span>
+    </div>
+    <div v-if="props.sensor.ancho && props.sensor.alto" class="status-row">
+      <span class="status-label">Profundidad</span>
+      <span class="status-value">
+        {{ props.sensor.ancho }} × {{ props.sensor.alto }} · {{ Number(props.sensor.fps || 0).toFixed(1) }} FPS
       </span>
     </div>
     <div class="status-row">

@@ -122,6 +122,27 @@ function actualizarNumero(campo, evento) {
       />
     </label>
 
+    <div class="calibration-subsection">
+      <div class="calibration-subtitle">Área capturada por Kinect</div>
+      <p class="calibration-help">Centra y ajusta el recorte para abarcar el interior de la caja.</p>
+      <label class="calibration-field">
+        <span>Centro horizontal <strong>{{ Math.round(props.modelValue.centroSensorX) }}%</strong></span>
+        <input type="range" min="0" max="100" step="1" :value="props.modelValue.centroSensorX" @input="actualizarNumero('centroSensorX', $event)" />
+      </label>
+      <label class="calibration-field">
+        <span>Centro vertical <strong>{{ Math.round(props.modelValue.centroSensorY) }}%</strong></span>
+        <input type="range" min="0" max="100" step="1" :value="props.modelValue.centroSensorY" @input="actualizarNumero('centroSensorY', $event)" />
+      </label>
+      <label class="calibration-field">
+        <span>Ancho del recorte <strong>{{ Math.round(props.modelValue.anchoSensor) }}%</strong></span>
+        <input type="range" min="10" max="100" step="1" :value="props.modelValue.anchoSensor" @input="actualizarNumero('anchoSensor', $event)" />
+      </label>
+      <label class="calibration-field">
+        <span>Alto del recorte <strong>{{ Math.round(props.modelValue.altoSensor) }}%</strong></span>
+        <input type="range" min="10" max="100" step="1" :value="props.modelValue.altoSensor" @input="actualizarNumero('altoSensor', $event)" />
+      </label>
+    </div>
+
     <label class="calibration-checkbox">
       <input
         type="checkbox"

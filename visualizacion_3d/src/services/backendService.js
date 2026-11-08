@@ -75,6 +75,26 @@ export const backendService = {
     return requestJson(buildUrl(API_ROUTES.estado), { signal })
   },
 
+  async getSensorEstado({ signal } = {}) {
+    return requestJson(buildUrl('/sensor/estado'), { signal })
+  },
+
+  async getEstadoProyeccion({ signal } = {}) {
+    return requestJson(buildUrl('/proyeccion/estado'), { signal })
+  },
+
+  async setEstadoProyeccion(activo) {
+    return requestJson(buildUrl('/proyeccion/control'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ activo }),
+    })
+  },
+
+  async getCalibracion({ signal } = {}) {
+    return requestJson(buildUrl('/calibracion'), { signal })
+  },
+
   async getConfiguracionSiExiste({ signal } = {}) {
     try {
       return await this.getConfiguracion({ signal })

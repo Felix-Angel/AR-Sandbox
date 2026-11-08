@@ -23,6 +23,18 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  fotogramaProfundidad: {
+    type: Object,
+    default: null,
+  },
+  sensorCapturando: {
+    type: Boolean,
+    default: false,
+  },
+  configuracionFisica: {
+    type: Object,
+    default: () => ({ caja: { anchoCm: 80, profundidadCm: 80 } }),
+  },
   calibracion: {
     type: Object,
     default: () => ({}),
@@ -55,6 +67,16 @@ const actualizarVisualizacion = () => {
     return
   }
 
+  if (props.fotogramaProfundidad) {
+    escena.actualizarMapaProfundidad(
+      props.fotogramaProfundidad,
+      props.configuracionFisica.caja,
+      props.calibracion,
+    )
+    return
+  }
+
+  escena.actualizarMapaProfundidad(null)
   if (!props.configurado) {
     escena.limpiarTerreno()
     return
@@ -96,7 +118,15 @@ watch(
 )
 
 watch(
-  () => [props.terreno, props.color, props.altura, props.configurado],
+  () => [
+    props.terreno,
+    props.color,
+    props.altura,
+    props.configurado,
+    props.fotogramaProfundidad,
+    props.configuracionFisica.caja.anchoCm,
+    props.configuracionFisica.caja.profundidadCm,
+  ],
   () => {
     actualizarVisualizacion()
   },
@@ -107,6 +137,13 @@ watch(
   () => props.calibracion,
   (calibracion) => {
     escena?.actualizarCalibracion(calibracion)
+    if (props.fotogramaProfundidad) {
+      escena?.actualizarMapaProfundidad(
+        props.fotogramaProfundidad,
+        props.configuracionFisica.caja,
+        calibracion,
+      )
+    }
   },
   { deep: true },
 )
@@ -144,8 +181,8 @@ onBeforeUnmount(() => {
           <div class="viewer-hint">Arrastra para orbitar · usa la rueda para acercar</div>
         </div>
       </div>
-      <span :class="['badge', props.estado === 'en_ejecucion' ? 'success' : 'neutral']" aria-live="polite">
-        {{ props.estado === 'en_ejecucion' ? 'En ejecución' : props.estado || 'Sin configurar' }}
+      <span :class="['badge', props.sensorCapturando || (!props.fotogramaProfundidad && props.estado === 'en_ejecucion') ? 'success' : 'neutral']" aria-live="polite">
+        {{ props.fotogramaProfundidad ? props.sensorCapturando ? 'Kinect en vivo' : 'Última captura' : props.estado === 'en_ejecucion' ? 'En ejecución' : props.estado || 'Sin configurar' }}
       </span>
       <button
         class="viewer-action"
@@ -158,7 +195,11 @@ onBeforeUnmount(() => {
       </button>
     </div>
     <div ref="contenedor" class="viewer-canvas" role="img" aria-label="Vista interactiva del terreno en tres dimensiones" />
-    <div v-if="!props.configurado" class="viewer-empty-message">
+    <div v-if="props.fotogramaProfundidad" class="viewer-empty-message depth-live-message">
+      Profundidad recibida · {{ props.fotogramaProfundidad.width }} × {{ props.fotogramaProfundidad.height }} ·
+      {{ props.fotogramaProfundidad.minDepthMm }}–{{ props.fotogramaProfundidad.maxDepthMm }} mm
+    </div>
+    <div v-else-if="!props.configurado" class="viewer-empty-message">
       Actualmente no hay una configuración guardada.
     </div>
   </div>

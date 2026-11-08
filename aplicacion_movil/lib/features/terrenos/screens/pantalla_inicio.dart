@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../core/network/backend_api_service.dart';
-import '../../../core/network/backend_config.dart';
 import '../../../core/network/models/configuracion_simulacion.dart'
     show ConfiguracionSimulacion, SolicitudConfiguracion, TerrenosApi;
 import '../../../core/network/models/respuesta_simulacion.dart' as api_models;
@@ -13,6 +12,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/imagen_terreno.dart';
 import '../../configuracion/screens/pantalla_configuracion.dart';
 import '../../simulacion/screens/pantalla_simulacion.dart';
+import '../../simulacion/screens/pantalla_sistema.dart';
 
 class PantallaInicio extends StatefulWidget {
   const PantallaInicio({super.key, this.backendApiService});
@@ -312,7 +312,7 @@ class _PantallaInicioState extends State<PantallaInicio> {
         simulacionSeleccionadaId: _simulacionSeleccionadaId,
         alSeleccionarSimulacion: _seleccionarSimulacion,
       ),
-      const _Ajustes(),
+      PantallaSistema(api: _backendApi, activa: _seccion == 4),
     ];
 
     return Scaffold(
@@ -371,7 +371,7 @@ class _BarraNavegacion extends StatelessWidget {
     (Icons.home_outlined, Icons.home_rounded, 'Inicio'),
     (Icons.add_rounded, Icons.add_rounded, 'Crear'),
     (Icons.bookmark_border_rounded, Icons.bookmark_rounded, 'Guardadas'),
-    (Icons.settings_outlined, Icons.settings_rounded, 'Ajustes'),
+    (Icons.tune_outlined, Icons.tune_rounded, 'Sistema'),
   ];
 
   @override
@@ -942,62 +942,5 @@ class _ConfigurarVacio extends StatelessWidget {
         ],
       ),
     ),
-  );
-}
-
-class _Ajustes extends StatelessWidget {
-  const _Ajustes();
-
-  @override
-  Widget build(BuildContext context) => ListView(
-    padding: const EdgeInsets.fromLTRB(20, 20, 20, 112),
-    children: [
-      Text(
-        'Ajustes',
-        style: Theme.of(context).textTheme.headlineSmall
-            ?.copyWith(color: AppTheme.texto, fontWeight: FontWeight.w800),
-      ),
-      const SizedBox(height: 6),
-      Text(
-        'Información de la aplicación y conexión.',
-        style: Theme.of(context).textTheme.bodyMedium
-            ?.copyWith(color: AppTheme.texto.withValues(alpha: .72)),
-      ),
-      SizedBox(height: 16),
-      Card(
-        child: ListTile(
-          leading: CircleAvatar(
-            backgroundColor: AppTheme.espresso,
-            child: Icon(Icons.landscape, color: Colors.white),
-          ),
-          title: Text('AR Sandbox'),
-          subtitle: Text('Explora y configura terrenos interactivos.'),
-        ),
-      ),
-      const SizedBox(height: 12),
-      Card(
-        child: ListTile(
-          leading: const Icon(Icons.dns_outlined, color: AppTheme.espresso),
-          title: const Text('Dirección de FastAPI'),
-          subtitle: Text(BackendConfig.baseUrl),
-          trailing: const Icon(Icons.lan_outlined, color: AppTheme.salvia),
-        ),
-      ),
-      const Padding(
-        padding: EdgeInsets.fromLTRB(16, 8, 16, 16),
-        child: Text(
-          'En el emulador Android, 10.0.2.2 apunta a tu computadora. Para un dispositivo físico se necesita la IP local del equipo.',
-          style: TextStyle(color: AppTheme.texto, height: 1.4),
-        ),
-      ),
-      const SizedBox(height: 4),
-      Card(
-        child: ListTile(
-          leading: Icon(Icons.info_outline, color: AppTheme.salvia),
-          title: Text('Aplicación móvil'),
-          subtitle: Text('AR Sandbox · Versión 1.0.0'),
-        ),
-      ),
-    ],
   );
 }
