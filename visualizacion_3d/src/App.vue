@@ -2,10 +2,18 @@
 import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import EstadoConexion from './components/EstadoConexion.vue'
 import PanelCalibracion from './components/PanelCalibracion.vue'
+import PanelConfiguracionFisica from './components/PanelConfiguracionFisica.vue'
 import PanelInformacion from './components/PanelInformacion.vue'
 import VisorTerreno from './components/VisorTerreno.vue'
 import { backendService } from './services/backendService.js'
 import { crearCanalProyector } from './services/projectorChannel.js'
+import { crearStreamProfundidad } from './services/sensorDepthStream.js'
+import {
+  CONFIGURACION_FISICA_INICIAL,
+  cargarConfiguracionFisica,
+  guardarConfiguracionFisica,
+  normalizarConfiguracionFisica,
+} from './services/configuracionFisica.js'
 
 const esVentanaProyeccion = new URLSearchParams(window.location.search).get('modo') === 'proyector'
 
@@ -21,9 +29,25 @@ const pantallaCompleta = ref(false)
 const canalDisponible = ref(true)
 const controlConectado = ref(false)
 const proyeccionActiva = ref(false)
+const proyeccionSolicitada = ref(false)
 const errorAperturaProyeccion = ref('')
 const ventanaProyeccion = shallowRef(null)
 const estadoCamara = ref(null)
+const fotogramaProfundidad = shallowRef(null)
+const estadoSensor = ref({
+  estado: 'desconectado',
+  conectado: false,
+  capturando: false,
+  ancho: 0,
+  alto: 0,
+  fps: 0,
+  flujoConectado: false,
+})
+const configuracionFisicaInicial = cargarConfiguracionFisica()
+const configuracionFisica = ref(
+  configuracionFisicaInicial || normalizarConfiguracionFisica(CONFIGURACION_FISICA_INICIAL),
+)
+const configuracionFisicaGuardada = ref(Boolean(configuracionFisicaInicial))
 const calibracion = ref({
   superficie: 'caja',
   orientacion: 'horizontal',
@@ -33,14 +57,23 @@ const calibracion = ref({
   desplazamientoY: 0,
   escala: 1,
   rotacion: 0,
+  centroSensorX: 50,
+  centroSensorY: 50,
+  anchoSensor: 100,
+  altoSensor: 100,
   mostrarCuadricula: false,
   mostrarMalla: false,
 })
 let intervaloActualizacion = null
+let intervaloEstadoSensor = null
 let consultaEnCurso = false
+let consultaSensorEnCurso = false
+let consultaSistemaEnCurso = false
+let calibracionRemotaSerializada = null
 let componenteActivo = true
 let consultaActiva = null
 let canalProyector = null
+let streamProfundidad = null
 let intervaloHeartbeatControl = null
 let intervaloAnuncioProyeccion = null
 let intervaloVigilanciaControl = null
@@ -116,8 +149,85 @@ async function consultarBackend({ silenciosa = false } = {}) {
   }
 }
 
+async function consultarEstadoSensor() {
+  if (!componenteActivo || consultaSensorEnCurso) return
+  consultaSensorEnCurso = true
+  try {
+    const respuesta = await backendService.getSensorEstado()
+    if (!componenteActivo) return
+    estadoSensor.value = {
+      ...respuesta,
+      flujoConectado: estadoSensor.value.flujoConectado,
+    }
+  } catch {
+    if (!componenteActivo) return
+    estadoSensor.value = {
+      ...estadoSensor.value,
+      estado: 'sin_backend',
+      conectado: false,
+      capturando: false,
+      fps: 0,
+    }
+  } finally {
+    consultaSensorEnCurso = false
+  }
+}
+
+async function consultarControlSistema() {
+  if (!componenteActivo || consultaSistemaEnCurso) return
+  consultaSistemaEnCurso = true
+  try {
+    const [proyeccion, ajustes] = await Promise.all([
+      backendService.getEstadoProyeccion(),
+      backendService.getCalibracion(),
+    ])
+    if (!componenteActivo) return
+    proyeccionSolicitada.value = proyeccion.activo === true
+    if (!esVentanaProyeccion) modoProyector.value = proyeccionSolicitada.value
+    const serializado = JSON.stringify(ajustes)
+    if (serializado !== calibracionRemotaSerializada) {
+      calibracionRemotaSerializada = serializado
+      calibracion.value = { ...calibracion.value, ...ajustes }
+    }
+  } catch {
+    // Si FastAPI no responde, se conserva la última configuración local conocida.
+  } finally {
+    consultaSistemaEnCurso = false
+  }
+}
+
+function iniciarStreamProfundidad() {
+  streamProfundidad = crearStreamProfundidad({
+    onConnection: (conectadoAlFlujo) => {
+      estadoSensor.value = {
+        ...estadoSensor.value,
+        flujoConectado: conectadoAlFlujo,
+      }
+    },
+    onFrame: (fotograma) => {
+      fotogramaProfundidad.value = fotograma
+      estadoSensor.value = {
+        ...estadoSensor.value,
+        ancho: fotograma.width,
+        alto: fotograma.height,
+        id_fotograma: fotograma.frameId,
+        profundidad_minima_mm: fotograma.minDepthMm,
+        profundidad_maxima_mm: fotograma.maxDepthMm,
+        pixeles_validos: fotograma.validPixels,
+      }
+    },
+    onError: (errorFlujo) => {
+      if (errorFlujo instanceof Error) {
+        estadoSensor.value = { ...estadoSensor.value, error: errorFlujo.message }
+      }
+    },
+  })
+}
+
 async function activarModoProyector() {
   modoProyector.value = true
+  proyeccionSolicitada.value = true
+  backendService.setEstadoProyeccion(true).catch(() => {})
 
   const elemento = contenedorApp.value
   if (!elemento || typeof elemento.requestFullscreen !== 'function') {
@@ -136,6 +246,8 @@ async function activarModoProyector() {
 
 function salirModoProyector() {
   modoProyector.value = false
+  proyeccionSolicitada.value = false
+  backendService.setEstadoProyeccion(false).catch(() => {})
   const salirDePantallaCompleta = document.fullscreenElement === contenedorApp.value
   pantallaCompleta.value = false
 
@@ -150,6 +262,8 @@ function sincronizarPantallaCompleta() {
   // Escape u otra salida del modo fullscreen también devuelve la interfaz al modo control.
   if (modoProyector.value && !pantallaCompleta.value) {
     modoProyector.value = false
+    proyeccionSolicitada.value = false
+    backendService.setEstadoProyeccion(false).catch(() => {})
   }
 }
 
@@ -169,8 +283,23 @@ function restablecerCalibracion() {
     desplazamientoY: 0,
     escala: 1,
     rotacion: 0,
+    centroSensorX: 50,
+    centroSensorY: 50,
+    anchoSensor: 100,
+    altoSensor: 100,
     mostrarCuadricula: false,
     mostrarMalla: false,
+  }
+}
+
+function guardarInstalacionFisica() {
+  try {
+    guardarConfiguracionFisica(configuracionFisica.value)
+    configuracionFisicaGuardada.value = true
+    error.value = ''
+  } catch (err) {
+    configuracionFisicaGuardada.value = false
+    error.value = err instanceof Error ? err.message : 'No se pudo guardar la instalación.'
   }
 }
 
@@ -182,6 +311,7 @@ function crearInstantaneaProyeccion() {
     estado: estado.value,
     conectado: conectado.value,
     calibracion: JSON.parse(JSON.stringify(calibracion.value)),
+    configuracionFisica: JSON.parse(JSON.stringify(configuracionFisica.value)),
     estadoCamara: estadoCamara.value
       ? JSON.parse(JSON.stringify(estadoCamara.value))
       : null,
@@ -234,6 +364,9 @@ function manejarMensajeProyector(mensaje) {
     estado.value = datos.estado
     conectado.value = datos.conectado
     calibracion.value = datos.calibracion
+    if (datos.configuracionFisica) {
+      configuracionFisica.value = normalizarConfiguracionFisica(datos.configuracionFisica)
+    }
     if (datos.estadoCamara) {
       estadoCamara.value = datos.estadoCamara
     }
@@ -292,6 +425,8 @@ function abrirVentanaProyeccion() {
 
   ventanaProyeccion.value = ventana
   proyeccionActiva.value = true
+  proyeccionSolicitada.value = true
+  backendService.setEstadoProyeccion(true).catch(() => {})
   if (intervaloCierreVentana !== null) window.clearInterval(intervaloCierreVentana)
   intervaloCierreVentana = window.setInterval(() => {
     if (!ventanaProyeccion.value || ventanaProyeccion.value.closed) {
@@ -299,6 +434,8 @@ function abrirVentanaProyeccion() {
       intervaloCierreVentana = null
       ventanaProyeccion.value = null
       proyeccionActiva.value = false
+      proyeccionSolicitada.value = false
+      backendService.setEstadoProyeccion(false).catch(() => {})
     }
   }, 750)
 }
@@ -307,6 +444,8 @@ function cerrarVentanaProyeccion() {
   if (ventanaProyeccion.value && !ventanaProyeccion.value.closed) {
     ventanaProyeccion.value.close()
   }
+  proyeccionSolicitada.value = false
+  backendService.setEstadoProyeccion(false).catch(() => {})
 }
 
 function iniciarAnuncioProyeccion() {
@@ -346,21 +485,40 @@ function iniciarCanalProyector() {
   intervaloHeartbeatControl = window.setInterval(enviarLatido, 2500)
 }
 
+watch(configuracionFisica, () => {
+  configuracionFisicaGuardada.value = false
+}, { deep: true })
+
 watch(
-  [configuracion, estado, conectado, calibracion],
+  [configuracion, estado, conectado, calibracion, configuracionFisica],
   () => enviarInstantaneaProyeccion(),
   { deep: true },
 )
 
 onMounted(() => {
   iniciarCanalProyector()
+  iniciarStreamProfundidad()
+  consultarControlSistema()
   document.addEventListener('fullscreenchange', sincronizarPantallaCompleta)
   document.addEventListener('keydown', manejarTecla)
 
-  if (esVentanaProyeccion) return
+  if (esVentanaProyeccion) {
+    consultarEstadoSensor()
+    intervaloEstadoSensor = window.setInterval(() => {
+      consultarEstadoSensor()
+      consultarControlSistema()
+    }, 2000)
+    return
+  }
 
   consultarBackend()
+  consultarEstadoSensor()
+  consultarControlSistema()
   intervaloActualizacion = window.setInterval(() => consultarBackend({ silenciosa: true }), 2000)
+  intervaloEstadoSensor = window.setInterval(() => {
+    consultarEstadoSensor()
+    consultarControlSistema()
+  }, 2000)
 })
 
 onUnmounted(() => {
@@ -381,8 +539,14 @@ onUnmounted(() => {
     window.clearInterval(intervaloActualizacion)
     intervaloActualizacion = null
   }
+  if (intervaloEstadoSensor !== null) {
+    window.clearInterval(intervaloEstadoSensor)
+    intervaloEstadoSensor = null
+  }
 
   consultaActiva?.abort()
+  streamProfundidad?.cerrar()
+  streamProfundidad = null
   canalProyector?.cerrar()
   canalProyector = null
 })
@@ -395,6 +559,7 @@ onUnmounted(() => {
     :class="{
       'projector-mode': !esVentanaProyeccion && modoProyector,
       'standalone-projection': esVentanaProyeccion,
+      'projection-paused': esVentanaProyeccion && !proyeccionSolicitada,
     }"
   >
     <header v-if="!esVentanaProyeccion" class="topbar">
@@ -463,6 +628,9 @@ onUnmounted(() => {
           :altura="Number(configuracion?.altura ?? 0)"
           :estado="estado"
           :configurado="configurado"
+          :fotograma-profundidad="fotogramaProfundidad"
+          :sensor-capturando="estadoSensor.capturando"
+          :configuracion-fisica="configuracionFisica"
           :calibracion="calibracion"
           :estado-camara="esVentanaProyeccion ? estadoCamara : null"
           @camera-ready="recibirCamaraInicial"
@@ -474,6 +642,12 @@ onUnmounted(() => {
         <PanelCalibracion
           v-model="calibracion"
           @restablecer="restablecerCalibracion"
+        />
+
+        <PanelConfiguracionFisica
+          v-model="configuracionFisica"
+          :guardada="configuracionFisicaGuardada"
+          @guardar="guardarInstalacionFisica"
         />
 
         <PanelInformacion
@@ -490,6 +664,7 @@ onUnmounted(() => {
           :cargando="cargando"
           :error="error"
           :ultima-actualizacion="ultimaActualizacion"
+          :sensor="estadoSensor"
         />
       </aside>
     </main>

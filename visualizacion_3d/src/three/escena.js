@@ -149,6 +149,30 @@ export function crearEscena(contendor, configuracionInicial = {}) {
   mallaTerreno.renderOrder = 1
   mallaTerreno.position.y = 0.012
   terrainGroup.add(mallaTerreno)
+  const materialSensor = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.94,
+    metalness: 0,
+    side: THREE.DoubleSide,
+  })
+  const sensorMesh = new THREE.Mesh(new THREE.BufferGeometry(), materialSensor)
+  sensorMesh.visible = false
+  sensorMesh.castShadow = false
+  sensorMesh.receiveShadow = true
+  terrainGroup.add(sensorMesh)
+  const coloresAltura = [
+    { posicion: 0, color: new THREE.Color('#2678c5') },
+    { posicion: 0.24, color: new THREE.Color('#35a66f') },
+    { posicion: 0.5, color: new THREE.Color('#e5d45d') },
+    { posicion: 0.76, color: new THREE.Color('#d87943') },
+    { posicion: 1, color: new THREE.Color('#f4eee0') },
+  ]
+  const colorAlturaTemporal = new THREE.Color()
+  const colorDatoInvalido = new THREE.Color('#111a15')
+  const alturaMaximaRelieve = 3.2
+  let mapaSensorActivo = false
+  let alturasSuavizadas = null
+  let claveGeometriaSensor = ''
   let calibracionAplicada = null
 
   const actualizarCalibracion = (calibracion = {}) => {
@@ -192,7 +216,8 @@ export function crearEscena(contendor, configuracionInicial = {}) {
     calibrationGroup.rotation.y = THREE.MathUtils.degToRad(rotacion)
     calibrationGroup.scale.set((ancho / 21.6) * escala, escala, (alto / 21.6) * escala)
     gridHelper.visible = nuevaCalibracion.mostrarCuadricula
-    mallaTerreno.visible = nuevaCalibracion.mostrarMalla && Boolean(terrenoMesh?.geometry)
+    const geometriaVisible = mapaSensorActivo ? sensorMesh.geometry : terrenoMesh?.geometry
+    mallaTerreno.visible = nuevaCalibracion.mostrarMalla && Boolean(geometriaVisible)
 
     if (cambioTransformacion) {
       renderer.shadowMap.needsUpdate = true
@@ -227,8 +252,9 @@ export function crearEscena(contendor, configuracionInicial = {}) {
   terrainGroup.add(grupoTerreno)
 
   const calcularDistanciaEncuadre = () => {
-    if (!terrenoMesh.visible || !terrenoMesh.geometry) return 24
-    const limites = new THREE.Box3().setFromObject(grupoTerreno)
+    if (!sensorMesh.visible && (!terrenoMesh.visible || !terrenoMesh.geometry)) return 24
+    const objetoVisible = sensorMesh.visible ? sensorMesh : grupoTerreno
+    const limites = new THREE.Box3().setFromObject(objetoVisible)
     const esfera = limites.getBoundingSphere(new THREE.Sphere())
     const fovVertical = THREE.MathUtils.degToRad(camera.fov)
     const fovHorizontal = 2 * Math.atan(Math.tan(fovVertical / 2) * camera.aspect)
@@ -239,8 +265,9 @@ export function crearEscena(contendor, configuracionInicial = {}) {
   }
 
   const encuadrarTerreno = (restablecer = false) => {
-    if (terrenoMesh.visible && terrenoMesh.geometry) {
-      const limites = new THREE.Box3().setFromObject(grupoTerreno)
+    if (sensorMesh.visible || (terrenoMesh.visible && terrenoMesh.geometry)) {
+      const objetoVisible = sensorMesh.visible ? sensorMesh : grupoTerreno
+      const limites = new THREE.Box3().setFromObject(objetoVisible)
       const centro = limites.getCenter(new THREE.Vector3())
       const tamano = limites.getSize(new THREE.Vector3())
       targetCamara.set(centro.x, centro.y + tamano.y * 0.25, centro.z)
@@ -284,7 +311,7 @@ export function crearEscena(contendor, configuracionInicial = {}) {
   actualizarCalibracion()
 
   const limpiarTerreno = () => {
-    const cambioVisibilidad = terrenoMesh.visible || baseTerreno.visible
+    const cambioVisibilidad = terrenoMesh.visible || baseTerreno.visible || sensorMesh.visible
     const habiaGeometria = Boolean(terrenoMesh.geometry)
 
     if (terrenoMesh.geometry) {
@@ -294,6 +321,8 @@ export function crearEscena(contendor, configuracionInicial = {}) {
 
     terrenoMesh.visible = false
     baseTerreno.visible = false
+    sensorMesh.visible = false
+    mapaSensorActivo = false
     mallaTerreno.visible = false
     configuracionAplicada = null
 
@@ -323,10 +352,7 @@ export function crearEscena(contendor, configuracionInicial = {}) {
     if (cambioGeometria) {
       const geometriaAnterior = terrenoMesh.geometry
       terrenoMesh.geometry = crearGeometriaTerreno(datos)
-      if (mallaTerreno.geometry !== geometriaAnterior) {
-        mallaTerreno.geometry.dispose()
-      }
-      mallaTerreno.geometry = terrenoMesh.geometry
+      if (!mapaSensorActivo) mallaTerreno.geometry = terrenoMesh.geometry
       geometriaAnterior?.dispose()
     }
 
@@ -334,18 +360,152 @@ export function crearEscena(contendor, configuracionInicial = {}) {
       terrenoMesh.material.color.set(obtenerColorTerreno(datos.color))
     }
 
-    terrenoMesh.visible = true
-    baseTerreno.visible = true
+    terrenoMesh.visible = !mapaSensorActivo
+    baseTerreno.visible = !mapaSensorActivo
+    if (!mapaSensorActivo) mallaTerreno.geometry = terrenoMesh.geometry
     mallaTerreno.visible = Boolean(calibracionAplicada?.mostrarMalla)
     configuracionAplicada = datos
 
-    if (!estabaVisible) {
+    if (!mapaSensorActivo && !estabaVisible) {
       encuadrarTerreno(true)
     }
 
     if (cambioGeometria || cambioVisibilidad) {
       renderer.shadowMap.needsUpdate = true
     }
+    solicitarRender()
+  }
+
+  const colorParaAltura = (alturaNormalizada, destino, offset) => {
+    const limite = coloresAltura.length - 1
+    const indice = Math.min(limite - 1, Math.floor(alturaNormalizada * limite))
+    const inicio = coloresAltura[indice]
+    const fin = coloresAltura[indice + 1]
+    const tramo = (alturaNormalizada - inicio.posicion) / (fin.posicion - inicio.posicion)
+    colorAlturaTemporal.lerpColors(inicio.color, fin.color, THREE.MathUtils.clamp(tramo, 0, 1))
+    destino[offset] = colorAlturaTemporal.r
+    destino[offset + 1] = colorAlturaTemporal.g
+    destino[offset + 2] = colorAlturaTemporal.b
+  }
+
+  const actualizarMapaProfundidad = (fotograma, dimensionesCaja = {}, calibracionSensor = {}) => {
+    if (!fotograma) {
+      const habiaMapaSensor = mapaSensorActivo || sensorMesh.visible
+      mapaSensorActivo = false
+      sensorMesh.visible = false
+      terrenoMesh.visible = Boolean(configuracionAplicada && terrenoMesh.geometry)
+      baseTerreno.visible = Boolean(configuracionAplicada)
+      if (terrenoMesh.geometry) mallaTerreno.geometry = terrenoMesh.geometry
+      mallaTerreno.visible = Boolean(calibracionAplicada?.mostrarMalla && terrenoMesh.geometry)
+      if (habiaMapaSensor) {
+        renderer.shadowMap.needsUpdate = true
+        encuadrarTerreno(false)
+      }
+      solicitarRender()
+      return
+    }
+
+    if (!(fotograma.buffer instanceof ArrayBuffer)
+      || !Number.isInteger(fotograma.width) || !Number.isInteger(fotograma.height)) return
+
+    const factorMuestreo = Math.min(1, 160 / fotograma.width, 120 / fotograma.height)
+    const columnas = Math.max(2, Math.round(fotograma.width * factorMuestreo))
+    const filas = Math.max(2, Math.round(fotograma.height * factorMuestreo))
+    const anchoCm = Math.min(500, Math.max(10, Number(dimensionesCaja.anchoCm) || 80))
+    const profundidadCm = Math.min(500, Math.max(10, Number(dimensionesCaja.profundidadCm) || 80))
+    const centroX = THREE.MathUtils.clamp(Number(calibracionSensor.centroSensorX ?? 50), 0, 100) / 100
+    const centroY = THREE.MathUtils.clamp(Number(calibracionSensor.centroSensorY ?? 50), 0, 100) / 100
+    const anchoSensor = THREE.MathUtils.clamp(Number(calibracionSensor.anchoSensor ?? 100), 10, 100) / 100
+    const altoSensor = THREE.MathUtils.clamp(Number(calibracionSensor.altoSensor ?? 100), 10, 100) / 100
+    const inicioX = THREE.MathUtils.clamp(centroX - anchoSensor / 2, 0, 1 - anchoSensor)
+    const inicioY = THREE.MathUtils.clamp(centroY - altoSensor / 2, 0, 1 - altoSensor)
+    const anchoEscena = anchoCm / 5
+    const profundidadEscena = profundidadCm / 5
+    const nuevaClave = `${columnas}x${filas}:${anchoEscena}x${profundidadEscena}:${inicioX}:${inicioY}:${anchoSensor}:${altoSensor}`
+
+    if (nuevaClave !== claveGeometriaSensor) {
+      const geometriaAnterior = sensorMesh.geometry
+      const geometria = new THREE.PlaneGeometry(
+        anchoEscena,
+        profundidadEscena,
+        columnas - 1,
+        filas - 1,
+      )
+      geometria.rotateX(-Math.PI / 2)
+      geometria.setAttribute('color', new THREE.BufferAttribute(new Float32Array(columnas * filas * 3), 3))
+      sensorMesh.geometry = geometria
+      mallaTerreno.geometry = geometria
+      if (geometriaAnterior && geometriaAnterior !== terrenoMesh.geometry) geometriaAnterior.dispose()
+      alturasSuavizadas = new Float32Array(columnas * filas)
+      claveGeometriaSensor = nuevaClave
+    }
+
+    const vistaDatos = new DataView(fotograma.buffer)
+    const profundidades = new Uint16Array(columnas * filas)
+    const muestrasValidas = []
+    for (let fila = 0; fila < filas; fila += 1) {
+      const origenY = Math.min(
+        fotograma.height - 1,
+        Math.round((inicioY + (fila / (filas - 1)) * altoSensor) * (fotograma.height - 1)),
+      )
+      for (let columna = 0; columna < columnas; columna += 1) {
+        const origenX = Math.min(
+          fotograma.width - 1,
+          Math.round((inicioX + (columna / (columnas - 1)) * anchoSensor) * (fotograma.width - 1)),
+        )
+        const indiceOrigen = origenY * fotograma.width + origenX
+        const profundidad = vistaDatos.getUint16(fotograma.payloadOffset + indiceOrigen * 2, true)
+        const indice = fila * columnas + columna
+        profundidades[indice] = profundidad
+        if (profundidad > 0) muestrasValidas.push(profundidad)
+      }
+    }
+
+    const posiciones = sensorMesh.geometry.attributes.position
+    const colores = sensorMesh.geometry.attributes.color.array
+    if (muestrasValidas.length === 0) return
+
+    muestrasValidas.sort((a, b) => a - b)
+    const limiteInferior = muestrasValidas[Math.floor((muestrasValidas.length - 1) * 0.05)]
+    const limiteSuperior = muestrasValidas[Math.floor((muestrasValidas.length - 1) * 0.95)]
+    const rangoProfundidad = Math.max(100, limiteSuperior - limiteInferior)
+    const rangoEfectivo = limiteInferior + rangoProfundidad
+    const posicionesArray = posiciones.array
+
+    for (let indice = 0; indice < profundidades.length; indice += 1) {
+      const profundidad = profundidades[indice]
+      const indiceVertice = indice * 3
+      if (profundidad === 0) {
+        posicionesArray[indiceVertice + 1] = 0
+        colorDatoInvalido.toArray(colores, indiceVertice)
+        continue
+      }
+
+      const alturaNormalizada = THREE.MathUtils.clamp(
+        (rangoEfectivo - profundidad) / rangoProfundidad,
+        0,
+        1,
+      )
+      const alturaObjetivo = alturaNormalizada * alturaMaximaRelieve
+      const alturaSuavizada = alturasSuavizadas[indice] * 0.28 + alturaObjetivo * 0.72
+      alturasSuavizadas[indice] = alturaSuavizada
+      posicionesArray[indiceVertice + 1] = alturaSuavizada
+      colorParaAltura(alturaSuavizada / alturaMaximaRelieve, colores, indiceVertice)
+    }
+
+    posiciones.needsUpdate = true
+    sensorMesh.geometry.attributes.color.needsUpdate = true
+    sensorMesh.geometry.computeVertexNormals()
+    sensorMesh.geometry.computeBoundingSphere()
+
+    const primerFotograma = !sensorMesh.visible
+    mapaSensorActivo = true
+    sensorMesh.visible = true
+    terrenoMesh.visible = false
+    baseTerreno.visible = false
+    mallaTerreno.geometry = sensorMesh.geometry
+    mallaTerreno.visible = Boolean(calibracionAplicada?.mostrarMalla)
+    if (primerFotograma) encuadrarTerreno(true)
     solicitarRender()
   }
 
@@ -434,6 +594,7 @@ export function crearEscena(contendor, configuracionInicial = {}) {
     renderer,
     controls,
     actualizarTerreno,
+    actualizarMapaProfundidad,
     actualizarCalibracion,
     obtenerEstadoCamara,
     aplicarEstadoCamara,
@@ -449,10 +610,15 @@ export function crearEscena(contendor, configuracionInicial = {}) {
       resizeObserver.disconnect()
       controls.dispose()
       const geometriaMalla = mallaTerreno.geometry
+      const geometriaSensor = sensorMesh.geometry
       terrainGroup.clear()
       if (geometriaMalla && geometriaMalla !== terrenoMesh.geometry) {
         geometriaMalla.dispose()
       }
+      if (geometriaSensor && geometriaSensor !== geometriaMalla && geometriaSensor !== terrenoMesh.geometry) {
+        geometriaSensor.dispose()
+      }
+      materialSensor.dispose()
       materialMalla.dispose()
       gridHelper.geometry.dispose()
       if (Array.isArray(gridHelper.material)) {

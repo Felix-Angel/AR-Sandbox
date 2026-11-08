@@ -1,0 +1,57 @@
+<Window x:Class="ArSandbox.KinectDepthPreview.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="AR Sandbox · Prueba de profundidad Kinect"
+        Width="1000"
+        Height="760"
+        MinWidth="680"
+        MinHeight="540"
+        Background="#101713"
+        Foreground="#F7F5EC"
+        WindowStartupLocation="CenterScreen">
+  <Grid Margin="22">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <StackPanel Grid.Row="0" Margin="0,0,0,16">
+      <TextBlock Text="Prueba de profundidad · Kinect Xbox 360"
+                 FontSize="23"
+                 FontWeight="Bold" />
+      <TextBlock Margin="0,5,0,0"
+                 Foreground="#B8C5BB"
+                 Text="Vista preliminar local; si FastAPI está activo, también recibe los fotogramas de profundidad." />
+    </StackPanel>
+
+    <Border Grid.Row="1"
+            Padding="8"
+            Background="#060907"
+            BorderBrush="#39483D"
+            BorderThickness="1"
+            CornerRadius="12">
+      <Image x:Name="VistaProfundidad"
+             Stretch="Uniform"
+             SnapsToDevicePixels="True" />
+    </Border>
+
+    <TextBlock x:Name="EstadoSensor"
+               Grid.Row="2"
+               Margin="2,14,2,0"
+               FontSize="15"
+               FontWeight="SemiBold"
+               Text="Buscando Kinect..." />
+    <TextBlock x:Name="EstadoBackend"
+               Grid.Row="3"
+               Margin="2,7,2,0"
+               Foreground="#D7C99A"
+               Text="Conectando con FastAPI..." />
+    <TextBlock Grid.Row="4"
+               Margin="2,7,2,0"
+               Foreground="#B8C5BB"
+               Text="Las zonas cercanas aparecen más claras. El contraste se ajusta al rango válido de cada fotograma; FastAPI reenvía los datos a los visores conectados." />
+  </Grid>
+</Window>

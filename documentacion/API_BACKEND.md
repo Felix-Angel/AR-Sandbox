@@ -2,9 +2,9 @@
 
 ## 1. Descripción general
 
-El backend expone una API HTTP para informar si el servicio está disponible, guardar varias simulaciones con nombre, seleccionar una y controlar su estado. La biblioteca se conserva en SQLite; el estado activo se mantiene en memoria.
+El backend expone una API HTTP para informar si el servicio está disponible, guardar varias simulaciones con nombre, seleccionar una y controlar su estado. También recibe fotogramas de profundidad del Kinect v1 por WebSocket y los reenvía a los visores conectados. La biblioteca se conserva en SQLite; el estado activo y el último fotograma se mantienen en memoria.
 
-Esta etapa no genera geometría 3D ni se conecta con sensores, proyección física o un servicio externo. Los endpoints de simulación solo administran la configuración y el estado lógico.
+La herramienta `sensor_kinect` envía profundidad al backend. Vue recorta el campo del sensor con los ajustes de calibración, genera la malla 3D y presenta el modo de proyección. Flutter consulta el estado del Kinect, controla el envío y la proyección y guarda la calibración.
 
 ## 2. Tecnologías
 
@@ -21,6 +21,12 @@ Los endpoints de negocio implementados en `backend/main.py` son:
 | --- | --- | --- | --- |
 | GET | `/` | Información básica del backend y del proyecto. | `200` |
 | GET | `/health` | Confirma que el servidor está disponible. | `200` |
+| GET | `/sensor/estado` | Consulta conexión, captura, resolución, FPS y estadísticas del último fotograma Kinect. | `200` |
+| POST | `/sensor/captura` | Inicia o pausa la captura Kinect con `{"activo": true/false}`. | `200`, `422` |
+| GET | `/proyeccion/estado` | Consulta si la proyección está solicitada. | `200` |
+| POST | `/proyeccion/control` | Inicia o detiene la proyección con `{"activo": true/false}`. | `200`, `422` |
+| GET | `/calibracion` | Recupera los ajustes guardados para la instalación. | `200` |
+| PUT | `/calibracion` | Valida y persiste el recorte Kinect y la transformación del proyector. | `200`, `422` |
 | POST | `/simulaciones/configuracion` | Valida y guarda la última configuración. | `201`, `422` |
 | GET | `/simulaciones/configuracion` | Devuelve la última configuración registrada. | `200`, `404` si todavía no existe |
 | POST | `/simulaciones/guardadas` | Guarda una simulación con nombre y la selecciona cuando no hay otra en ejecución. | `201`, `422` |
@@ -29,6 +35,57 @@ Los endpoints de negocio implementados en `backend/main.py` son:
 | POST | `/simulaciones/iniciar` | Inicia con la configuración registrada. No acepta cuerpo. | `200`, `400` si falta configuración o ya está en ejecución |
 | POST | `/simulaciones/detener` | Detiene una simulación activa. No acepta cuerpo. | `200`, `400` si no hay ejecución activa |
 | GET | `/simulaciones/estado` | Consulta el estado y la configuración asociada, si existe. | `200` |
+
+Rutas WebSocket para profundidad:
+
+| Ruta | Dirección | Propósito |
+| --- | --- | --- |
+| `/ws/sensor/captura` | Puente Kinect → FastAPI | Acepta una conexión de captura y recibe fotogramas binarios ARKD v1. |
+| `/ws/sensor/stream` | FastAPI → visor | Envía el último fotograma al conectar y retransmite los siguientes. |
+
+### Estado del sensor
+
+`GET /sensor/estado` devuelve, por ejemplo:
+
+```json
+{
+  "estado": "capturando",
+  "conectado": true,
+  "captura_solicitada": true,
+  "capturando": true,
+  "ancho": 640,
+  "alto": 480,
+  "fps": 30.0,
+  "id_fotograma": 125,
+  "ultimo_fotograma": "2026-11-07T12:00:00+00:00",
+  "profundidad_minima_mm": 812,
+  "profundidad_maxima_mm": 2310,
+  "pixeles_validos": 286000,
+  "visores_conectados": 1
+}
+```
+
+`estado` puede ser `desconectado`, `conectado_sin_datos` o `capturando`. La captura se considera activa mientras llega al menos un fotograma cada dos segundos. El estado y el fotograma más reciente se guardan en memoria; se limpian al reiniciar FastAPI.
+
+### Formato del fotograma binario ARKD v1
+
+Cada mensaje binario de `/ws/sensor/captura` y `/ws/sensor/stream` contiene una cabecera little-endian de 30 bytes y una matriz de profundidad sin comprimir:
+
+| Desplazamiento | Tipo | Campo |
+| --- | --- | --- |
+| 0 | 4 bytes | Firma ASCII `ARKD` |
+| 4 | `uint8` | Versión (`1`) |
+| 5 | `uint8` | Flags reservados (`0`) |
+| 6 | `uint16` | Ancho en píxeles |
+| 8 | `uint16` | Alto en píxeles |
+| 10 | `uint32` | Número de fotograma |
+| 14 | `uint64` | Marca de tiempo UTC Unix en milisegundos |
+| 22 | `uint16` | Profundidad válida mínima en milímetros |
+| 24 | `uint16` | Profundidad válida máxima en milímetros |
+| 26 | `uint32` | Número de píxeles con profundidad válida |
+| 30 | `ancho × alto × 2` bytes | Profundidades `uint16` en milímetros, en orden por filas; `0` indica dato inválido |
+
+Se admiten dimensiones de hasta 640 × 480. El backend rechaza paquetes con firma, versión, estadísticas o tamaño incompatibles. Solo se permite un emisor Kinect activo por proceso de FastAPI.
 
 FastAPI también proporciona estas rutas automáticas de documentación:
 
@@ -279,18 +336,18 @@ El error se devuelve también si falta un campo, el terreno no está permitido, 
 
 ## 8. Almacenamiento temporal
 
-La biblioteca de simulaciones se guarda en `backend/simulaciones.db` mediante SQLite y sobrevive al reinicio del servidor. El estado de ejecución y la configuración activa siguen en memoria y vuelven a `sin_configurar` al reiniciar. El almacenamiento activo tampoco se comparte entre varios procesos del servidor.
+La biblioteca de simulaciones y la calibración se guardan en `backend/simulaciones.db` mediante SQLite y sobreviven al reinicio del servidor. El estado de ejecución, la captura solicitada y la proyección solicitada siguen en memoria y vuelven a sus valores iniciales al reiniciar. El almacenamiento activo tampoco se comparte entre varios procesos del servidor.
 
-## 9. Uso futuro desde el módulo 3D
+## 9. Integración con Flutter y el módulo 3D
 
 El módulo de visualización 3D podrá consultar:
 
 - `GET /simulaciones/estado` para conocer el estado y la configuración asociada.
 - `GET /simulaciones/configuracion` para leer la última configuración; antes del primer registro esta ruta responde `404`.
 
-La información de configuración disponible es `terreno`, `color` y `altura`; el estado es uno de los cuatro valores documentados. Flutter es quien debe enviar actualmente la configuración mediante `POST /simulaciones/configuracion` y controlar el inicio/detención mediante los endpoints correspondientes. La API actual no define rutas para que el módulo 3D envíe geometría, fotogramas, datos de sensores o resultados, por lo que no debe suponerse que esos datos se puedan publicar.
+La información de terreno contiene `terreno`, `color` y `altura`. Flutter controla el estado de simulación, captura y proyección; carga/guarda calibración en `/calibracion`. El puente Kinect envía profundidad a `/ws/sensor/captura`, donde recibe los comandos de pausar y reanudar. Vue consulta la calibración y recibe fotogramas por `/ws/sensor/stream` para actualizar el relieve.
 
-La simulación actual solo registra un estado lógico local del backend: no produce por sí misma una escena 3D ni una proyección.
+FastAPI conserva la calibración en SQLite y sirve sus valores a Flutter y Vue. La solicitud de proyección controla los visores web abiertos; el navegador todavía puede requerir una acción del usuario para entrar a pantalla completa.
 
 ## 10. Ejecutar el backend
 

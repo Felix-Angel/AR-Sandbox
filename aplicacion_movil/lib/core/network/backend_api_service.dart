@@ -57,6 +57,30 @@ class BackendApiService {
     return EstadoSimulacion.fromJson(json);
   }
 
+  Future<Map<String, dynamic>> obtenerEstadoSensor() =>
+      _request('GET', '/sensor/estado');
+
+  Future<Map<String, dynamic>> controlarCapturaSensor(bool activo) =>
+      _request('POST', '/sensor/captura', body: {'activo': activo});
+
+  Future<bool> obtenerEstadoProyeccion() async =>
+      (await _request('GET', '/proyeccion/estado'))['activo'] == true;
+
+  Future<bool> controlarProyeccion(bool activo) async =>
+      (await _request(
+        'POST',
+        '/proyeccion/control',
+        body: {'activo': activo},
+      ))['activo'] ==
+      true;
+
+  Future<Map<String, dynamic>> obtenerCalibracion() =>
+      _request('GET', '/calibracion');
+
+  Future<Map<String, dynamic>> guardarCalibracion(
+    Map<String, dynamic> ajustes,
+  ) => _request('PUT', '/calibracion', body: ajustes);
+
   Future<List<SimulacionGuardada>> listarSimulacionesGuardadas() async {
     final uri = _baseUri.resolve('/simulaciones/guardadas');
     try {
